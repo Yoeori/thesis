@@ -13,6 +13,9 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -Wall -ansi -Wno-deprecated -march=native -mtune=native -O3")
 endif()
 
+# Can be useful for debugging but will make Poplar segmentationfault.
+# set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g3 -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC")
+
 find_package(poplar REQUIRED)
 include_directories(include)
 add_subdirectory(src)

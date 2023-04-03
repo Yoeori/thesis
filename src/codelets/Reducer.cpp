@@ -8,19 +8,20 @@
 
 using namespace poplar;
 
-class Reducer : public Vertex {
+class Reducer : public Vertex
+{
 public:
-    InOut <Vector<float>> result;
-    InOut <Vector<float>> data;
+    InOut<Vector<float>> vs;
+    int block_length;
 
-    int row_space;
-    int blocks;
-
-    auto compute() -> bool {
-
-        for (auto block = 0; block < blocks; block++) {
-            for (auto i = 0; i < row_space; i++) {
-                result[i] += data[block * row_space + i];
+    auto compute() -> bool
+    {
+        int last_block = (vs.size() / block_length - 1) * block_length;
+        for (int i = 0; i < vs.size() / block_length; i++)
+        {
+            for (int n = 0; n < block_length; n++)
+            {
+                vs[last_block + n] += vs[block_length * i + n];
             }
         }
 

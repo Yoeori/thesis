@@ -16,5 +16,5 @@ target_link_libraries(matrix-ipu-calc
         )
 
 configure_file(codelets/MatrixBlock.cpp codelets/MatrixBlock.cpp COPYONLY)
-configure_file(codelets/Addition.cpp codelets/Addition.cpp COPYONLY)
 configure_file(codelets/Reducer.cpp codelets/Reducer.cpp COPYONLY)
+configure_file(codelets/ReducerToVector.cpp codelets/ReducerToVector.cpp COPYONLY)
