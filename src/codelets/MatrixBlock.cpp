@@ -5,10 +5,11 @@
 #include <stdint.h>
 #include <assert.h>
 #include <cmath>
+// #include "print.h"
 
 using namespace poplar;
 
-class MatrixBlock : public Vertex
+class MatrixBlock : public MultiVertex
 {
 public:
     // Data structure:
@@ -20,11 +21,11 @@ public:
     Input<Vector<float>> vec;
     Output<Vector<float>> res;
 
-    auto compute() -> bool
+    auto compute(unsigned workerId) -> bool
     {
         // Performs basic matrix * vector mult for block
         // Go by row
-        for (auto i = 0; i < row_idx.size() - 1; i++)
+        for (auto i = workerId; i < row_idx.size() - 1; i+= MultiVertex::numWorkers())
         {
             float sum = 0.0;
             for (auto j = row_idx[i]; j < row_idx[i + 1]; j++)
