@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <fstream>
 #include <map>
+#include <numeric>
 
 #include <cxxopts.hpp>
 
@@ -14,6 +15,18 @@
 #include <poplar/DeviceManager.hpp>
 
 using namespace std;
+
+// https://stackoverflow.com/questions/2342162/stdstring-formatting-like-sprintf
+template<typename ... Args>
+std::string string_format( const std::string& format, Args ... args )
+{
+    int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
+    if( size_s <= 0 ){ throw std::runtime_error( "Error during formatting." ); }
+    auto size = static_cast<size_t>( size_s );
+    std::unique_ptr<char[]> buf( new char[ size ] );
+    std::snprintf( buf.get(), size, format.c_str(), args ... );
+    return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
+}
 
 int main(int argc, char *argv[])
 {
@@ -90,8 +103,10 @@ int main(int argc, char *argv[])
     auto ipu_matrix = prepare_data(mtx.value(), device->getTarget().getNumTiles());
 
     std::cout << "Building programs.." << std::endl;
-    build_compute_graph(graph, tensors, programs, device->getTarget().getNumTiles(), ipu_matrix);
+    auto rounds = result["rounds"].as<int>();
+    build_compute_graph(graph, tensors, programs, device->getTarget().getNumTiles(), ipu_matrix, rounds);
     build_data_streams(graph, tensors, programs, ipu_matrix);
+    build_full_compute(graph, tensors, programs, ipu_matrix);
 
     auto ENGINE_OPTIONS = OptionFlags{};
 
@@ -142,15 +157,26 @@ int main(int argc, char *argv[])
 
     // Run all programs in order
     std::cout << "Running programs.." << std::endl;
-    engine.run(programIds["copy_to_ipu_matrix"]);
-    engine.run(programIds["copy_to_ipu_vec"]);
+    engine.run(programIds["main"], "main program");
+    // engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
+    // engine.run(programIds["copy_to_ipu_vec"], "copy vector");
 
-    std::cout << "Copying done.." << std::endl;
-    engine.run(programIds["spmv"], "spmv");
-    std::cout << "SPMV done.." << std::endl;
-    engine.run(programIds["reduce"]);
-    std::cout << "Reduce done.." << std::endl;
-    engine.run(programIds["copy_to_host"]);
+    // std::cout << "Copying done.." << std::endl;
+
+    // auto rounds = result["rounds"].as<int>();    
+    // for (auto i = 1; i <= rounds; i++)
+    // {
+    //     std::cout << "Round " << i << std::endl;
+    //     engine.run(programIds["spmv"], string_format("SpMV %i", i));
+    //     std::cout << "SPMV done.." << std::endl;
+
+    //     // engine.run(programIds["print_result_vec"], string_format("Print vec %d", i));
+
+    //     engine.run(programIds["reduce"], string_format("Reduce %i", i));
+    //     std::cout << "Reduce done.." << std::endl;
+    // }
+
+    // engine.run(programIds["copy_to_host"], "copy to host");
 
     if (Config::get().debug)
     {

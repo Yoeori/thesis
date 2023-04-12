@@ -100,10 +100,10 @@ public:
     vector<int> row_idx;
 
     // matrix data
-    int blocks;
-    int block_height;
-    int m;
-    int n;
+    unsigned int blocks;
+    unsigned int block_height;
+    unsigned int m;
+    unsigned int n;
 
 };
 
@@ -174,7 +174,7 @@ IPUMatrix<T> prepare_data(matrix::Matrix<T> matrix, const int num_tiles)
 
 // }
 
-void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, const int num_tiles, IPUMatrix<float> &ipu_matrix)
+void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, const int num_tiles, IPUMatrix<float> &ipu_matrix, const int loops)
 {
 
     // Static Matrix data
@@ -197,9 +197,9 @@ void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string,
     // We build the compute set for the MatrixBlock codelet
     auto spmv_cs = graph.addComputeSet("spmv");
 
-    for (auto y = 0; y < ipu_matrix.blocks; y++)
+    for (unsigned int y = 0; y < ipu_matrix.blocks; y++)
     {
-        for (auto x = 0; x < ipu_matrix.blocks; x++)
+        for (unsigned int x = 0; x < ipu_matrix.blocks; x++)
         {
             auto block_id = y * ipu_matrix.blocks + x;
             auto v = graph.addVertex(spmv_cs, "MatrixBlock", {
@@ -216,30 +216,32 @@ void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string,
         }
     }
 
-    programs["spmv"] = Execute(spmv_cs);
+    auto program_spmv = Execute(spmv_cs);
 
     // We build the compute set for addition
     auto reducer_cs = graph.addComputeSet("reduce");
 
-    for (auto y = 0; y < ipu_matrix.blocks; y++) {
+    for (unsigned int y = 0; y < ipu_matrix.blocks; y++) {
         
         auto v = graph.addVertex(reducer_cs, "ReducerToVector", {
             {"res", tensors["res"].slice(y * ipu_matrix.blocks * ipu_matrix.block_height, (y + 1) * ipu_matrix.blocks * ipu_matrix.block_height)},
-            {"vector", tensors["vector"].slice(y * ipu_matrix.block_height, (y + 1) * ipu_matrix.block_height)}
+            {"vector", tensors["vector"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))}
         });
 
-        if (y == ipu_matrix.blocks - 1) {
-            graph.setInitialValue(v["block_length"], std::max(0, ipu_matrix.m - ipu_matrix.block_height * ipu_matrix.blocks));
-        } else {
-            graph.setInitialValue(v["block_length"], ipu_matrix.block_height);
-        }
+        graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
+        graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
         graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
+        // graph.setInitialValue(v["tile"], ipu_matrix.blocks * ipu_matrix.blocks + y);
 
         graph.setPerfEstimate(v, 100);
         graph.setTileMapping(v, ipu_matrix.blocks * ipu_matrix.blocks + y);
     }
 
-    programs["reduce"] = Execute(reducer_cs);
+    auto program_reduce = Execute(reducer_cs);
+    programs["loop"] = Repeat(
+        loops,
+        Sequence{program_spmv, program_reduce}
+    );
 }
 
 auto build_data_streams(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, IPUMatrix<float> &ipu_matrix)
@@ -262,6 +264,13 @@ auto build_data_streams(Graph &graph, map<string, Tensor> &tensors, map<string, 
     programs["copy_to_ipu_vec"] = copyto_vec;
 
     programs["copy_to_host"] = copyhost_vec;
+
+    programs["print_result_vec"] = PrintTensor(tensors["res"], "Current result");
+}
+
+auto build_full_compute(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, IPUMatrix<float> &ipu_matrix)
+{
+    programs["main"] = Sequence{programs["copy_to_ipu_matrix"], programs["copy_to_ipu_vec"], programs["loop"], programs["copy_to_host"]};
 }
 
 auto serialize_graph(const Graph &graph)
