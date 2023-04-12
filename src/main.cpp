@@ -5,12 +5,15 @@
 #include <fstream>
 #include <map>
 #include <numeric>
+#include <tuple>
 
 #include <cxxopts.hpp>
 
 #include "config.cpp"
 #include "ipu.cpp"
 #include "cpu.cpp"
+
+#include "experiments/sparse_matrix_vector_mult.cpp"
 
 #include <poplar/DeviceManager.hpp>
 
@@ -35,7 +38,12 @@ int main(int argc, char *argv[])
     cxxopts::Options options("matrix-ipu-calc", "Run matrix vector product calculations on the Graphcore IPU");
 
     options.add_options()("d,debug", "Enable debugging") // Enables debug tooling for the IPU
-        ("v,verbose", "Verbose output")("model", "Run on the IPU simulator")("matrix", "The input matrix", cxxopts::value<string>())("h,help", "Print me!");
+        ("v,verbose", "Verbose output")
+        ("model", "Run on the IPU simulator")
+        ("matrix", "The input matrix", cxxopts::value<string>())
+        ("h,help", "Print me!")
+        ("r,rounds", "Amount of SpMV rounds using the previous result", cxxopts::value<int>()->default_value("1")
+        );
 
     options.positional_help("[matrix.mtx]");
     options.parse_positional({"matrix", ""});
@@ -63,7 +71,12 @@ int main(int argc, char *argv[])
     // auto mtx = matrix::read_matrix_market<float>(matrix_file);
     // fclose(matrix_file);
 
-    auto mtx = optional(matrix::times<float>(370, 2));
+    // auto mtx = optional(matrix::identity<float>(1000));
+    // auto mtx = optional(matrix::times<float>(2000, 2.0));
+    auto mtx = optional(matrix::ones<float>(7000));
+    // std::vector<float> v(1000);
+    // std::iota(std::begin(v), std::end(v), 1);
+    // auto mtx = optional(matrix::identity_from_iterator(v));
 
     if (!mtx.has_value())
     {
@@ -95,98 +108,30 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    Graph graph = create_graph_add_codelets(device.value());
-
-    auto tensors = map<string, Tensor>{};
-    auto programs = map<string, Program>{};
-
-    auto ipu_matrix = prepare_data(mtx.value(), device->getTarget().getNumTiles());
-
-    std::cout << "Building programs.." << std::endl;
+    // Perform SpMV experiment
     auto rounds = result["rounds"].as<int>();
-    build_compute_graph(graph, tensors, programs, device->getTarget().getNumTiles(), ipu_matrix, rounds);
-    build_data_streams(graph, tensors, programs, ipu_matrix);
-    build_full_compute(graph, tensors, programs, ipu_matrix);
-
-    auto ENGINE_OPTIONS = OptionFlags{};
+    auto res = exp_spmv::execute(device.value(), *mtx, rounds);
 
     if (Config::get().debug)
     {
-        ENGINE_OPTIONS = OptionFlags{
-            {"target.saveArchive", "archive.a"},
-            {"debug.instrument", "true"},
-            {"debug.instrumentCompute", "true"},
-            {"debug.loweredVarDumpFile", "vars.capnp"},
-            {"debug.instrumentControlFlow", "true"},
-            {"debug.computeInstrumentationLevel", "tile"},
-            {"debug.outputAllSymbols", "true"},
-            {"autoReport.all", "true"},
-            {"autoReport.outputSerializedGraph", "true"},
-            {"debug.retainDebugInformation", "true"},
-        };
+        serialize_graph(res.value().graph);
+        res.value().engine.printProfileSummary(std::cout, OptionFlags{});
     }
 
-    auto programIds = map<string, int>();
-    auto programsList = vector<Program>(programs.size());
-    int index = 0;
-    for (auto &nameToProgram : programs)
-    {
-        programIds[nameToProgram.first] = index;
-        programsList[index] = nameToProgram.second;
-        index++;
-    }
-
-    std::cout << "Compiling graph.." << std::endl;
-    auto engine = Engine(graph, programsList, ENGINE_OPTIONS);
-    engine.load(*device);
-
-    if (Config::get().debug)
-    {
-        engine.enableExecutionProfiling();
-    }
-
-    auto vec = vector<float>(ipu_matrix.n, 1.0);
-
-    engine.connectStream("toipu_matrix", ipu_matrix.matrix.data());
-    engine.connectStream("toipu_idx", ipu_matrix.idx.data());
-    engine.connectStream("toipu_row_idx", ipu_matrix.row_idx.data());
-    engine.connectStream("toipu_vec", vec.data());
-
-    auto result_vec = vector<float>(ipu_matrix.n);
-    engine.connectStream("fromipu_vec", result_vec.data());
-
-    // Run all programs in order
-    std::cout << "Running programs.." << std::endl;
-    engine.run(programIds["main"], "main program");
-    // engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
-    // engine.run(programIds["copy_to_ipu_vec"], "copy vector");
-
-    // std::cout << "Copying done.." << std::endl;
-
-    // auto rounds = result["rounds"].as<int>();    
-    // for (auto i = 1; i <= rounds; i++)
+    // std::cout << "Resulting vector:\n";
+    // long int res = 0;
+    // for (auto v : result_vec)
     // {
-    //     std::cout << "Round " << i << std::endl;
-    //     engine.run(programIds["spmv"], string_format("SpMV %i", i));
-    //     std::cout << "SPMV done.." << std::endl;
-
-    //     // engine.run(programIds["print_result_vec"], string_format("Print vec %d", i));
-
-    //     engine.run(programIds["reduce"], string_format("Reduce %i", i));
-    //     std::cout << "Reduce done.." << std::endl;
+    //     // std::cout << v << ", ";
+    //     res += static_cast<long int>(v);
     // }
+    // // std::cout << std::endl;
+    // std::cout << "Sum: " << res << std::endl;
+    
+    // std::cout << "Sum: " << std::accumulate(result_vec.begin(), result_vec.end(), decltype(result_vec)::value_type(0)) << "\n";
 
-    // engine.run(programIds["copy_to_host"], "copy to host");
+    // Perform calculation locally on CPU, and check results.
 
-    if (Config::get().debug)
-    {
-        serialize_graph(graph);
-        engine.printProfileSummary(std::cout, OptionFlags{});
-    }
-
-    for (auto v : result_vec)
-        std::cout << v << ", ";
-    std::cout << std::endl;
 
     return 0;
 }

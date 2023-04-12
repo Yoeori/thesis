@@ -1,8 +1,9 @@
-#include <iostream>
+#ifndef _THESIS_MATRIX_HPP
+#define _THESIS_MATRIX_HPP 1
+
 #include <cstdlib>
 #include <algorithm>
 #include <iomanip>
-#include <fstream>
 #include <map>
 
 using namespace std;
@@ -219,3 +220,5 @@ namespace matrix
         return matrix;
     }
 }
+
+#endif

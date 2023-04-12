@@ -1,5 +1,5 @@
-#ifndef MTXIPU_CONFIG
-#define MTXIPU_CONFIG
+#ifndef MTXIPU_CONFIG_CONFIG
+#define MTXIPU_CONFIG_CONFIG
 
 class Config {
 public:
