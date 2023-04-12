@@ -181,7 +181,8 @@ namespace matrix
     Matrix<T> times(int size, T n)
     {
         Matrix<T> matrix(size, size, size);
-        for (auto i = 0; i < size; i++) {
+        for (auto i = 0; i < size; i++)
+        {
             matrix.set(i, i, n);
         }
         return matrix;
@@ -190,6 +191,31 @@ namespace matrix
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     Matrix<T> identity(int size)
     {
-        return times(size, 1);
+        return times(size, (T)1);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    Matrix<T> identity_from_iterator(vector<T> vec)
+    {
+        Matrix<T> matrix(vec.size(), vec.size(), vec.size());
+        for (size_t i = 0; i < vec.size(); i++)
+        {
+            matrix.set(i, i, vec[i]);
+        }
+        return matrix;
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    Matrix<T> ones(int size)
+    {
+        Matrix<T> matrix(size, size, size*size);
+        for (int x = 0; x < size; x++)
+        {
+            for (int y = 0; y < size; y++)
+            {
+                matrix.set(x, y, (T)1);
+            }
+        }
+        return matrix;
     }
 }
