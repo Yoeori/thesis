@@ -14,6 +14,7 @@
 #include "cpu.cpp"
 
 #include "experiments/sparse_matrix_vector_mult.cpp"
+#include "experiments/breadth_first_search.cpp"
 
 #include <poplar/DeviceManager.hpp>
 
