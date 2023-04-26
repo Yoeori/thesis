@@ -1,3 +1,6 @@
+#ifndef MTXIPU_IPU
+#define MTXIPU_IPU
+
 #include <poplar/IPUModel.hpp>
 #include <poputil/TileMapping.hpp>
 #include <poplar/DeviceManager.hpp>
@@ -52,3 +55,5 @@ auto serialize_graph(const Graph &graph)
     graph.serialize(graphSerOfs, poplar::SerializationFormat::Binary);
     graphSerOfs.close();
 }
+
+#endif

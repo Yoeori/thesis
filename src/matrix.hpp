@@ -1,5 +1,5 @@
-#ifndef _THESIS_MATRIX_HPP
-#define _THESIS_MATRIX_HPP 1
+#ifndef THESIS_MATRIX_HPP
+#define THESIS_MATRIX_HPP
 
 #include <cstdlib>
 #include <algorithm>
@@ -179,20 +179,32 @@ namespace matrix
     }
 
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
-    Matrix<T> times(int size, T n)
+    Matrix<T> times(int size, T n, int top_offsett)
     {
-        Matrix<T> matrix(size, size, size);
-        for (auto i = 0; i < size; i++)
+        Matrix<T> matrix(size, size, size - top_offsett);
+        for (auto i = 0; i < size - top_offsett; i++)
         {
-            matrix.set(i, i, n);
+            matrix.set(i + top_offsett, i, n);
         }
         return matrix;
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    Matrix<T> times(int size, T n)
+    {
+        return times_offset(size, n, 0);
     }
 
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     Matrix<T> identity(int size)
     {
         return times(size, (T)1);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    Matrix<T> identity(int size, int top_offset)
+    {
+        return times(size, (T)1, top_offset);
     }
 
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>

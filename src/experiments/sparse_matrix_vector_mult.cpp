@@ -12,6 +12,7 @@
 
 #include "../matrix.hpp"
 #include "../config.cpp"
+#include "../ipu.cpp"
 
 using ::poplar::Device;
 using ::poplar::Engine;
@@ -99,7 +100,7 @@ namespace exp_spmv
                             if (matrix.get(mi, mj) != 0)
                             {
                                 ipu_matrix[offsets[y * blocks + x + 1]] = matrix.get(mj, mi);
-                                idx[offsets[y * blocks + x + 1]] = mj;// - block_size_col * x;
+                                idx[offsets[y * blocks + x + 1]] = mj - block_size_col * x;
 
                                 offsets[y * blocks + x + 1] += 1;
                             }
@@ -121,21 +122,15 @@ namespace exp_spmv
 
             // Static Matrix data
             tensors["matrix"] = graph.addVariable(FLOAT, {ipu_matrix.matrix.size()}, "matrix");
-            poputil::mapTensorLinearly(graph, tensors["matrix"]); // TODO: is it usefull/necessary to apply a simple mapping?
-
             tensors["idx"] = graph.addVariable(INT, {ipu_matrix.idx.size()}, "idx");
-            poputil::mapTensorLinearly(graph, tensors["idx"]);
-
             tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.row_idx.size()}, "row_idx");
-            poputil::mapTensorLinearly(graph, tensors["row_idx"]);
 
             // Input/Output vector
             tensors["vector"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.n}, "vector");
-            poputil::mapTensorLinearly(graph, tensors["vector"]);
+            // poputil::mapTensorLinearly(graph, tensors["vector"]);
 
             tensors["res"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.blocks * ipu_matrix.blocks * ipu_matrix.block_height}, "result");
-            poputil::mapTensorLinearly(graph, tensors["res"]);
-
+            
             // We build the compute set for the MatrixBlock codelet
             auto spmv_cs = graph.addComputeSet("spmv");
 
@@ -148,13 +143,19 @@ namespace exp_spmv
                         {"matrix", tensors["matrix"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
                         {"idx", tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
                         {"row_idx", tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1))},
-                        {"vec", tensors["vector"]},
+                        {"vec", tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height))},
                         {"res", tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height)}
                     });
 
                     // TODO need to be calculated;
                     graph.setPerfEstimate(v, 100);
                     graph.setTileMapping(v, block_id);
+
+                    graph.setTileMapping(tensors["matrix"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
+                    graph.setTileMapping(tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
+                    graph.setTileMapping(tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1)), block_id);
+                    graph.setTileMapping(tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height)), block_id);
+                    graph.setTileMapping(tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height), block_id);
                 }
             }
 
@@ -173,14 +174,13 @@ namespace exp_spmv
                 graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
                 graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
                 graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
-                // graph.setInitialValue(v["tile"], ipu_matrix.blocks * ipu_matrix.blocks + y);
 
                 graph.setPerfEstimate(v, 100);
                 graph.setTileMapping(v, ipu_matrix.blocks * ipu_matrix.blocks + y);
             }
 
             auto program_reduce = Execute(reducer_cs);
-            programs["loop"] = Repeat(
+            programs["main"] = Repeat(
                 loops,
                 Sequence{program_spmv, program_reduce}
             );
@@ -206,13 +206,6 @@ namespace exp_spmv
             programs["copy_to_ipu_vec"] = copyto_vec;
 
             programs["copy_to_host"] = copyhost_vec;
-
-            programs["print_result_vec"] = PrintTensor(tensors["res"], "Current result");
-        }
-
-        auto build_full_compute(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, IPUMatrix<float> &ipu_matrix)
-        {
-            programs["main"] = Sequence{programs["copy_to_ipu_matrix"], programs["copy_to_ipu_vec"], programs["loop"], programs["copy_to_host"]};
         }
 
         auto create_graph_add_codelets(const Device &device) -> Graph
@@ -254,7 +247,6 @@ namespace exp_spmv
 
         build_compute_graph(graph, tensors, programs, device.getTarget().getNumTiles(), ipu_matrix, rounds);
         build_data_streams(graph, tensors, programs, ipu_matrix);
-        build_full_compute(graph, tensors, programs, ipu_matrix);
 
         auto ENGINE_OPTIONS = OptionFlags{};
 
@@ -296,7 +288,28 @@ namespace exp_spmv
 
         // Run all programs in order
         std::cout << "Running programs.." << std::endl;
-        engine.run(programIds["main"], "main program");
+        std::cout << "Copy data to IPU\n";
+        engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
+        engine.run(programIds["copy_to_ipu_vec"], "copy vector");
+
+        std::cout << "Run main program\n";
+        engine.run(programIds["main"], "main loop");
+
+        std::cout << "Copying back result\n";
+        engine.run(programIds["copy_to_host"], "copy result");
+
+        // std::cout << "Resulting vector:\n";
+        long int res = 0;
+        for (auto v : result_vec)
+        {
+        //     std::cout << v << ", ";
+            res += static_cast<long int>(v);
+        }
+        // std::cout << std::endl;
+
+        serialize_graph(graph);
+        engine.printProfileSummary(std::cout, OptionFlags{});
+        std::cout << "Sum: " << res << std::endl;
 
         return ExpResult(graph, engine);
     }

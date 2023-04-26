@@ -110,13 +110,13 @@ int main(int argc, char *argv[])
 
     // Perform SpMV experiment
     auto rounds = result["rounds"].as<int>();
-    auto res = exp_spmv::execute(device.value(), *mtx, rounds);
+    exp_spmv::execute(device.value(), *mtx, rounds);
 
-    if (Config::get().debug)
-    {
-        serialize_graph(res.value().graph);
-        res.value().engine.printProfileSummary(std::cout, OptionFlags{});
-    }
+    // if (Config::get().debug)
+    // {
+    //     serialize_graph(res.value().graph);
+    //     res.value().engine.printProfileSummary(std::cout, OptionFlags{});
+    // }
 
     // std::cout << "Resulting vector:\n";
     // long int res = 0;
