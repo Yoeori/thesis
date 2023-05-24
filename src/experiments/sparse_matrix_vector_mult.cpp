@@ -127,8 +127,6 @@ namespace exp_spmv
 
             // Input/Output vector
             tensors["vector"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.n}, "vector");
-            // poputil::mapTensorLinearly(graph, tensors["vector"]);
-
             tensors["res"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.blocks * ipu_matrix.blocks * ipu_matrix.block_height}, "result");
             
             // We build the compute set for the MatrixBlock codelet
