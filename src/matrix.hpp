@@ -111,7 +111,7 @@ namespace matrix
         int nz; // non-zero values
     };
 
-    // Structure meant for _very large_ sparse matrixes
+    // Structure meant for _very large_ (read: high number of rows/cols) sparse matrixes
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     struct SparseMatrix
     {
@@ -131,6 +131,48 @@ namespace matrix
         long long m;
         long long n;
         size_t nz; // Our matrix is limited by the theoretical max size of a vector
+    };
+
+    /**
+     * Generates a random permutation of a given size which can be apply on any vector or matrix.
+     * Includes helper to reverse permutation
+    */
+    struct Permutation
+    {
+    public:
+        Permutation(size_t size, unsigned int seed): size(size)
+        {
+            perm = vector<size_t>(size);
+            rev = vector<size_t>(size);
+
+            srand(seed);
+            std::iota(perm.begin(), perm.end(), 0);
+            std::random_shuffle(perm.begin(), perm.end());
+
+            // Fill rev
+            for (size_t i = 0; i < perm.size(); i++) {
+                rev[perm[i]] = i;
+            }
+        }
+
+        Permutation(size_t size): Permutation(size, Config::get().seed)
+        {}
+
+        size_t apply(size_t in)
+        {
+            assert(in < size);
+            return perm[in];
+        }
+
+        size_t reverse(size_t in)
+        {
+            assert(in < size);
+            return rev[in];
+        }
+    private:
+        size_t size;
+        vector<size_t> perm;
+        vector<size_t> rev;
     };
 
     /**

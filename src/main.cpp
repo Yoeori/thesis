@@ -43,8 +43,8 @@ int main(int argc, char *argv[])
         ("model", "Run on the IPU simulator")
         ("matrix", "The input matrix", cxxopts::value<string>())
         ("h,help", "Print me!")
-        ("r,rounds", "Amount of SpMV rounds using the previous result", cxxopts::value<int>()->default_value("1")
-        );
+        ("r,rounds", "Amount of SpMV rounds using the previous result", cxxopts::value<int>()->default_value("1"))
+        ("seed", "Seed used when randomness is involved, otherwise `time(NULL)` is used");
 
     options.positional_help("[matrix.mtx]");
     options.parse_positional({"matrix", ""});
@@ -59,7 +59,8 @@ int main(int argc, char *argv[])
 
     Config::get().debug = result.count("debug");
     Config::get().verbose = result.count("verbose");
-
+    Config::get().seed = result.count("seed") ? result["seed"].as<unsigned int>() : time(NULL);
+    
     // We read in the matrix
     // FILE* matrix_file = fopen(result["matrix"].as<string>().c_str(), "r");
 
