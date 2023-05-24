@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <map>
+#include <random>
 
 using namespace std;
 
@@ -53,11 +54,56 @@ namespace matrix
         }
     }
 
+    /**
+     * Generates a random permutation of a given size which can be apply on any vector or matrix.
+     * Includes helper to reverse permutation
+     */
+    struct Permutation
+    {
+    public:
+        Permutation(size_t size, unsigned int seed) : size(size)
+        {
+            perm = vector<size_t>(size);
+            rev = vector<size_t>(size);
+
+            srand(seed);
+            std::iota(perm.begin(), perm.end(), 0);
+            std::random_shuffle(perm.begin(), perm.end());
+
+            // Fill rev
+            for (size_t i = 0; i < perm.size(); i++)
+            {
+                rev[perm[i]] = i;
+            }
+        }
+
+        Permutation(size_t size) : Permutation(size, Config::get().seed)
+        {
+        }
+
+        size_t apply(size_t in)
+        {
+            assert(in < size);
+            return perm[in];
+        }
+
+        size_t reverse(size_t in)
+        {
+            assert(in < size);
+            return rev[in];
+        }
+
+    private:
+        size_t size;
+        vector<size_t> perm;
+        vector<size_t> rev;
+    };
+
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     struct Matrix
     {
     public:
-        Matrix(int m, int n, int nz) : m(m), n(n), nz(nz)
+        Matrix(int m, int n, int nz) : applied_perm(nullopt), m(m), n(n), nz(nz)
         {
             matrix = vector<T>(m * n);
         }
@@ -87,22 +133,30 @@ namespace matrix
             return nz;
         }
 
-        // Shuffles the Matrix rows and columns uniformly, returns a mapping how the matrix was shuffled
-        std::pair<vector<int>, vector<int>> shuffle()
+        void permutate(Permutation perm)
         {
-            // General functioning: we first create a mapping, create a set with todo, pop from set and follow chain using a temporary vec
-            vector<T> temp(std::max(m, n));
+            // We generate a new matrix
+            auto new_matrix = vector(m * n);
 
-            std::vector<int> row_map(m);
-            std::iota(std::begin(row_map), std::end(row_map), 0);
-            std::random_shuffle(row_map.begin(), row_map.end());
+            for (size_t i = 0; i < m; i++)
+            {
+                for (size_t j = 0; j < n; j++)
+                {
+                    new_matrix[perm.apply(i) * n + perm.apply(j)] = matrix[i * n + j];
+                }
+            }
 
-            std::vector<int> col_map(n);
-            std::iota(std::begin(col_map), std::end(col_map), 0);
-            std::random_shuffle(col_map.begin(), col_map.end());
-
-            return make_pair(row_map, col_map);
+            // Apply permutation
+            matrix = new_matrix;
+            applied_perm = optional(perm);
         }
+
+        void permutate()
+        {
+            permutate(Permutation(n));
+        }
+
+        optional<Permutation> applied_perm;
 
     private:
         vector<T> matrix;
@@ -116,12 +170,36 @@ namespace matrix
     struct SparseMatrix
     {
     public:
-        SparseMatrix(long long m, long long n, size_t nz) : m(m), n(n), nz(nz)
+        SparseMatrix(long long m, long long n, size_t nz) : applied_perm(nullopt), m(m), n(n), nz(nz)
         {
             i = vector<long long>(nz);
             j = vector<long long>(nz);
             v = vector<T>(nz);
         }
+
+        void permutate(Permutation perm)
+        {
+            // We generate a new matrix
+            auto new_i = vector(nz);
+            auto new_j = vector(nz);
+
+            for (size_t k = 0; k < nz; k++) {
+                new_i[k] = perm.apply(i[k]);
+                new_j[k] = perm.apply(j[k]);
+            }
+
+            // Apply permutation
+            i = new_i;
+            j = new_j;
+            applied_perm = optional(perm);
+        }
+
+        void permutate()
+        {
+            permutate(Permutation(n));
+        }
+
+        optional<Permutation> applied_perm;
 
     private:
         vector<T> v;
@@ -131,48 +209,6 @@ namespace matrix
         long long m;
         long long n;
         size_t nz; // Our matrix is limited by the theoretical max size of a vector
-    };
-
-    /**
-     * Generates a random permutation of a given size which can be apply on any vector or matrix.
-     * Includes helper to reverse permutation
-    */
-    struct Permutation
-    {
-    public:
-        Permutation(size_t size, unsigned int seed): size(size)
-        {
-            perm = vector<size_t>(size);
-            rev = vector<size_t>(size);
-
-            srand(seed);
-            std::iota(perm.begin(), perm.end(), 0);
-            std::random_shuffle(perm.begin(), perm.end());
-
-            // Fill rev
-            for (size_t i = 0; i < perm.size(); i++) {
-                rev[perm[i]] = i;
-            }
-        }
-
-        Permutation(size_t size): Permutation(size, Config::get().seed)
-        {}
-
-        size_t apply(size_t in)
-        {
-            assert(in < size);
-            return perm[in];
-        }
-
-        size_t reverse(size_t in)
-        {
-            assert(in < size);
-            return rev[in];
-        }
-    private:
-        size_t size;
-        vector<size_t> perm;
-        vector<size_t> rev;
     };
 
     /**
@@ -263,7 +299,7 @@ namespace matrix
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     Matrix<T> ones(int size)
     {
-        Matrix<T> matrix(size, size, size*size);
+        Matrix<T> matrix(size, size, size * size);
         for (int x = 0; x < size; x++)
         {
             for (int y = 0; y < size; y++)

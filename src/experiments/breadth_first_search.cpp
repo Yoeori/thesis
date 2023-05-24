@@ -42,7 +42,7 @@ namespace exp_bfs
         struct BFS_IPUMatrix
         {
         public:
-            BFS_IPUMatrix(vector<int> offsets, vector<int> idx, vector<int> row_idx, int blocks, int block_height, int m, int n) : offsets(offsets), idx(idx), row_idx(row_idx), blocks(blocks), block_height(block_height), m(m), n(n) {}
+            BFS_IPUMatrix(vector<int> offsets, vector<int> idx, vector<int> row_idx, int blocks, int block_height, int m, int n, unsigned int frontier) : offsets(offsets), idx(idx), row_idx(row_idx), blocks(blocks), block_height(block_height), m(m), n(n), frontier(frontier) {}
 
             vector<int> offsets;
 
@@ -55,6 +55,8 @@ namespace exp_bfs
             unsigned int block_height;
             unsigned int m;
             unsigned int n;
+
+            unsigned int frontier;
         };
 
         auto prepare_data(matrix::Matrix<float> matrix, const int num_tiles)
@@ -110,20 +112,28 @@ namespace exp_bfs
             // Final value should be nz (sum of every block)
             assert(offsets[offsets.size() - 1] == matrix.nonzeroes());
 
-            return BFS_IPUMatrix(offsets, idx, row_idx, blocks, block_size_row, matrix.rows(), matrix.cols());
+            unsigned int frontier = 0;
+
+            if (matrix.applied_perm.has_value()) {
+                frontier = matrix.applied_perm.value().apply(0);
+            }
+
+            return BFS_IPUMatrix(offsets, idx, row_idx, blocks, block_size_row, matrix.rows(), matrix.cols(), frontier);
         }
 
-        void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, const int num_tiles, BFS_IPUMatrix &ipu_matrix, const int loops)
+        void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, const int num_tiles, BFS_IPUMatrix &ipu_matrix)
         {
             // Static Matrix data
             tensors["idx"] = graph.addVariable(INT, {ipu_matrix.idx.size()}, "idx");
-            poputil::mapTensorLinearly(graph, tensors["idx"]);
             tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.row_idx.size()}, "row_idx");
-            poputil::mapTensorLinearly(graph, tensors["row_idx"]);
 
             // Input/Output vector
             tensors["frontier"] = graph.addVariable(BOOL, {(unsigned int)ipu_matrix.n}, "frontier");
-            poputil::mapTensorLinearly(graph, tensors["frontier"]);
+            
+            graph.setInitialValue(tensors["frontier"].slice(0, ipu_matrix.n), poplar::ArrayRef(vector<int>(ipu_matrix.n, 0)));
+
+
+            graph.setInitialValue(tensors["frontier"][0], true); // our first frontier value is always node 0 (col 0), we need to apply a permutation if we have used one
 
             tensors["dist"] = graph.addVariable(UNSIGNED_INT, {(unsigned int)ipu_matrix.n}, "dist");
             poputil::mapTensorLinearly(graph, tensors["dist"]);

@@ -283,6 +283,8 @@ namespace exp_spmv
 
         auto vec = vector<float>(ipu_matrix.n, 1.0);
 
+        // TODO: if we change the input vector we need to apply the matrix mapping to it for a correct result.
+
         engine.connectStream("toipu_matrix", ipu_matrix.matrix.data());
         engine.connectStream("toipu_idx", ipu_matrix.idx.data());
         engine.connectStream("toipu_row_idx", ipu_matrix.row_idx.data());
