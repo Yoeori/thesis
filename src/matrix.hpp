@@ -251,6 +251,10 @@ namespace matrix
             fscanf(f, "\n");
 
             matrix.set((im - 1), (jm - 1), val);
+
+            if (mm_is_symmetric(matcode)) {
+                matrix.set((jm - 1), (im - 1), val);
+            }
         }
 
         return optional(matrix);
