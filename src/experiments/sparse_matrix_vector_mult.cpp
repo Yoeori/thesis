@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 #include <poplar/Engine.hpp>
 #include <poputil/TileMapping.hpp>
@@ -28,7 +29,6 @@ using ::poplar::program::Execute;
 using ::poplar::program::Program;
 using ::poplar::program::Repeat;
 using ::poplar::program::Sequence;
-using ::poplar::program::PrintTensor;
 
 namespace exp_spmv
 {
@@ -94,7 +94,6 @@ namespace exp_spmv
                         // Record row offsets
                         row_idx[(y * blocks + x) * (block_size_row + 1) + mi - block_size_row * y] = offsets[y * blocks + x + 1] - offsets[y * blocks + x];
 
-
                         for (auto mj = block_size_col * x; mj < std::min(block_size_col * (x + 1), matrix.cols()); mj++)
                         {
                             if (matrix.get(mi, mj) != 0)
@@ -128,7 +127,7 @@ namespace exp_spmv
             // Input/Output vector
             tensors["vector"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.n}, "vector");
             tensors["res"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.blocks * ipu_matrix.blocks * ipu_matrix.block_height}, "result");
-            
+
             // We build the compute set for the MatrixBlock codelet
             auto spmv_cs = graph.addComputeSet("spmv");
 
@@ -162,8 +161,8 @@ namespace exp_spmv
             // We build the compute set for addition
             auto reducer_cs = graph.addComputeSet("reduce");
 
-            for (unsigned int y = 0; y < ipu_matrix.blocks; y++) {
-                
+            for (unsigned int y = 0; y < ipu_matrix.blocks; y++)
+            {
                 auto v = graph.addVertex(reducer_cs, "ReducerToVector", {
                     {"res", tensors["res"].slice(y * ipu_matrix.blocks * ipu_matrix.block_height, (y + 1) * ipu_matrix.blocks * ipu_matrix.block_height)},
                     {"vector", tensors["vector"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))}
@@ -180,8 +179,7 @@ namespace exp_spmv
             auto program_reduce = Execute(reducer_cs);
             programs["main"] = Repeat(
                 loops,
-                Sequence{program_spmv, program_reduce}
-            );
+                Sequence{program_spmv, program_reduce});
         }
 
         auto build_data_streams(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, IPUMatrix<float> &ipu_matrix)
@@ -218,18 +216,24 @@ namespace exp_spmv
         }
     }
 
-    struct ExpResult {
-        Graph &graph;
-        Engine &engine;
+    struct ExpResult
+    {
+        ExpResult(double timing_graph_compilation, double timing_copy, double timing_execute, double timing_coupyres) : timing_graph_compilation(timing_graph_compilation), timing_copy(timing_copy), timing_execute(timing_execute), timing_copyres(timing_copyres)
+        {
+        }
 
-        ExpResult(Graph &g, Engine &e): graph(g), engine(e) {};
+        double timing_graph_compilation;
+        double timing_copy;
+        double timing_execute;
+        double timing_copyres;
     };
 
     optional<ExpResult> execute(const Device &device, matrix::Matrix<float> &matrix, int rounds)
     {
         std::cout << "Executing Sparse Matrix Vector multiplication experiment.." << std::endl;
 
-        if (rounds != 1 && matrix.rows() != matrix.cols()) {
+        if (rounds != 1 && matrix.rows() != matrix.cols())
+        {
             std::cout << "Multi-round was requested, but not supported by matrix." << std::endl;
             return std::nullopt;
         }
@@ -251,8 +255,7 @@ namespace exp_spmv
         if (Config::get().debug)
         {
             ENGINE_OPTIONS = OptionFlags{
-                {"autoReport.all", "true"}
-            };
+                {"autoReport.all", "true"}};
         }
 
         auto programIds = map<string, int>();
@@ -266,8 +269,12 @@ namespace exp_spmv
         }
 
         std::cout << "Compiling graph.." << std::endl;
+        
+        auto execution_start = std::chrono::high_resolution_clock::now();
         auto engine = Engine(graph, programsList, ENGINE_OPTIONS);
         engine.load(device);
+        auto execution_end = std::chrono::high_resolution_clock::now();
+        auto timing_graph_compilation = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
 
         if (Config::get().debug)
         {
@@ -287,14 +294,26 @@ namespace exp_spmv
         // Run all programs in order
         std::cout << "Running programs.." << std::endl;
         std::cout << "Copy data to IPU\n";
+
+        auto execution_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
         engine.run(programIds["copy_to_ipu_vec"], "copy vector");
+        auto execution_end = std::chrono::high_resolution_clock::now();
+        auto copy_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
 
         std::cout << "Run main program\n";
+
+        auto execution_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["main"], "main loop");
+        auto execution_end = std::chrono::high_resolution_clock::now();
+        auto execution_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
 
         std::cout << "Copying back result\n";
+
+        auto execution_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_host"], "copy result");
+        auto execution_end = std::chrono::high_resolution_clock::now();
+        auto copyback_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
 
         // std::cout << "Resulting vector:\n";
         long int res = 0;
@@ -309,6 +328,6 @@ namespace exp_spmv
         engine.printProfileSummary(std::cout, OptionFlags{});
         std::cout << "Sum: " << res << std::endl;
 
-        return ExpResult(graph, engine);
+        return ExpResult(timing_graph_compilation, copy_timing, execution_timing, copyback_timing);
     }
 }
