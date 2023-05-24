@@ -5,6 +5,7 @@ class Config {
 public:
     bool debug;
     bool verbose;
+    unsigned int seed;
 
     static Config& get() {
         static Config instance;
