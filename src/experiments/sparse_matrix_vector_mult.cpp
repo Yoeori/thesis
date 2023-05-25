@@ -218,7 +218,7 @@ namespace exp_spmv
 
     struct ExpResult
     {
-        ExpResult(double timing_graph_compilation, double timing_copy, double timing_execute, double timing_coupyres) : timing_graph_compilation(timing_graph_compilation), timing_copy(timing_copy), timing_execute(timing_execute), timing_copyres(timing_copyres)
+        ExpResult(double timing_graph_compilation, double timing_copy, double timing_execute, double timing_copyres) : timing_graph_compilation(timing_graph_compilation), timing_copy(timing_copy), timing_execute(timing_execute), timing_copyres(timing_copyres)
         {
         }
 
@@ -270,11 +270,11 @@ namespace exp_spmv
 
         std::cout << "Compiling graph.." << std::endl;
         
-        auto execution_start = std::chrono::high_resolution_clock::now();
+        auto timing_graph_compilation_start = std::chrono::high_resolution_clock::now();
         auto engine = Engine(graph, programsList, ENGINE_OPTIONS);
         engine.load(device);
-        auto execution_end = std::chrono::high_resolution_clock::now();
-        auto timing_graph_compilation = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
+        auto timing_graph_compilation_end = std::chrono::high_resolution_clock::now();
+        auto timing_graph_compilation = std::chrono::duration_cast<std::chrono::nanoseconds>(timing_graph_compilation_end - timing_graph_compilation_start).count() / 1e3;
 
         if (Config::get().debug)
         {
@@ -297,11 +297,11 @@ namespace exp_spmv
         std::cout << "Running programs.." << std::endl;
         std::cout << "Copy data to IPU\n";
 
-        auto execution_start = std::chrono::high_resolution_clock::now();
+        auto copy_timing_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
         engine.run(programIds["copy_to_ipu_vec"], "copy vector");
-        auto execution_end = std::chrono::high_resolution_clock::now();
-        auto copy_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
+        auto copy_timing_end = std::chrono::high_resolution_clock::now();
+        auto copy_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(copy_timing_end - copy_timing_start).count() / 1e3;
 
         std::cout << "Run main program\n";
 
@@ -312,10 +312,10 @@ namespace exp_spmv
 
         std::cout << "Copying back result\n";
 
-        auto execution_start = std::chrono::high_resolution_clock::now();
+        auto copyback_timing_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_host"], "copy result");
-        auto execution_end = std::chrono::high_resolution_clock::now();
-        auto copyback_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
+        auto copyback_timing_end = std::chrono::high_resolution_clock::now();
+        auto copyback_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(copyback_timing_end - copyback_timing_start).count() / 1e3;
 
         // std::cout << "Resulting vector:\n";
         long int res = 0;

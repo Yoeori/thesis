@@ -6,6 +6,9 @@
 #include <iomanip>
 #include <map>
 #include <random>
+#include <assert.h>
+
+#include "config.cpp"
 
 using namespace std;
 
@@ -136,11 +139,11 @@ namespace matrix
         void permutate(Permutation perm)
         {
             // We generate a new matrix
-            auto new_matrix = vector(m * n);
+            auto new_matrix = vector<T>(m * n);
 
-            for (size_t i = 0; i < m; i++)
+            for (int i = 0; i < m; i++)
             {
-                for (size_t j = 0; j < n; j++)
+                for (int j = 0; j < n; j++)
                 {
                     new_matrix[perm.apply(i) * n + perm.apply(j)] = matrix[i * n + j];
                 }
@@ -180,10 +183,11 @@ namespace matrix
         void permutate(Permutation perm)
         {
             // We generate a new matrix
-            auto new_i = vector(nz);
-            auto new_j = vector(nz);
+            auto new_i = vector<long long>(nz);
+            auto new_j = vector<long long>(nz);
 
-            for (size_t k = 0; k < nz; k++) {
+            for (size_t k = 0; k < nz; k++)
+            {
                 new_i[k] = perm.apply(i[k]);
                 new_j[k] = perm.apply(j[k]);
             }
@@ -232,6 +236,11 @@ namespace matrix
             return std::nullopt;
         }
 
+        if (mm_is_symmetric(matcode))
+        {
+            nz = nz * 2;
+        }
+
         Matrix<T> matrix(m, n, nz);
 
         for (auto i = 0; i < nz; i++)
@@ -252,7 +261,8 @@ namespace matrix
 
             matrix.set((im - 1), (jm - 1), val);
 
-            if (mm_is_symmetric(matcode)) {
+            if (mm_is_symmetric(matcode))
+            {
                 matrix.set((jm - 1), (im - 1), val);
             }
         }
