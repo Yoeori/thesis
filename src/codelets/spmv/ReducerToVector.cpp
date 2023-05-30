@@ -16,13 +16,12 @@ public:
     // We sum 0, n, n*2, n*3 ... to vector[0]
     // 1, n+1, n*2 + 1 ... to vector[1] etc.
 
-    Input<Vector<float>> res;
+    Vector<Input<Vector<float>>> res;
     Output<Vector<float>> vector;
 
     int block_length;
     int res_block_length;
     int blocks;
-    // int tile;
 
     auto compute(unsigned workerId) -> bool
     {
@@ -31,7 +30,7 @@ public:
             auto sum = 0;
             for (rptsize_t n = 0; n < blocks; n+=1)
             {
-                sum += res[n * res_block_length + i];
+                sum += res[n][i];
             }
             vector[i] = sum;
         }
