@@ -7,7 +7,7 @@ This code was written in connection to my masther thesis at the [University of B
 The following tooling are required for compilation:
 - CMake (build tooling)
 - [Conan](https://conan.io/) (C++ dependency management)
-- Graphcore SDK (2.6.0)
+- Graphcore SDK (3.0.0)
 
 After downloading the required tooling, choose a suitable build location, e.g. the folder `build`. There the following can be executed:
 ```sh
