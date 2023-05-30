@@ -173,18 +173,18 @@ namespace matrix
     struct SparseMatrix
     {
     public:
-        SparseMatrix(long long m, long long n, size_t nz) : applied_perm(nullopt), m(m), n(n), nz(nz)
+        SparseMatrix(long m, long n, size_t nz) : applied_perm(nullopt), m(m), n(n), nz(nz)
         {
-            i = vector<long long>(nz);
-            j = vector<long long>(nz);
+            i = vector<long>(nz);
+            j = vector<long>(nz);
             v = vector<T>(nz);
         }
 
         void permutate(Permutation perm)
         {
             // We generate a new matrix
-            auto new_i = vector<long long>(nz);
-            auto new_j = vector<long long>(nz);
+            auto new_i = vector<long>(nz);
+            auto new_j = vector<long>(nz);
 
             for (size_t k = 0; k < nz; k++)
             {
@@ -203,15 +203,44 @@ namespace matrix
             permutate(Permutation(n));
         }
 
+        int rows()
+        {
+            return m;
+        }
+
+        int cols()
+        {
+            return n;
+        }
+
+        int nonzeroes()
+        {
+            return nz;
+        }
+
+        void set(size_t idx, long vi, long vj, T value)
+        {
+            assert(idx < nz);
+            i[idx] = vi;
+            j[idx] = vj;
+            v[idx] = value;
+        }
+
+        tuple<long, long, T> get(size_t idx)
+        {
+            assert(idx < nz);
+            return make_tuple(i[idx], j[idx], v[idx]);
+        }
+
         optional<Permutation> applied_perm;
 
     private:
         vector<T> v;
-        vector<long long> i;
-        vector<long long> j;
+        vector<long> i;
+        vector<long> j;
 
-        long long m;
-        long long n;
+        long m;
+        long n;
         size_t nz; // Our matrix is limited by the theoretical max size of a vector
     };
 
@@ -263,7 +292,61 @@ namespace matrix
 
             if (mm_is_symmetric(matcode))
             {
+                i++;
                 matrix.set((jm - 1), (im - 1), val);
+            }
+        }
+
+        return optional(matrix);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    optional<SparseMatrix<T>> read_matrix_market_sparse(FILE *f)
+    {
+        MM_typecode matcode;
+
+        // Incase of errors we return empty
+        // We check if the request matches the data
+        if (mm_read_banner(f, &matcode) != 0 || !mm_is_coordinate(matcode))
+        {
+            return std::nullopt;
+        }
+
+        int m, n, nz; // rows, cols, non-zero's
+        if ((mm_read_mtx_crd_size(f, &m, &n, &nz)) != 0)
+        {
+            return std::nullopt;
+        }
+
+        if (mm_is_symmetric(matcode))
+        {
+            nz = nz * 2;
+        }
+
+        SparseMatrix<T> matrix(m, n, nz);
+
+        for (auto i = 0; i < nz; i++)
+        {
+            int im, jm;
+            T val;
+
+            fscanf(f, "%d %d", &im, &jm);
+            if (mm_is_pattern(matcode))
+            {
+                val = 1;
+            }
+            else if (!fscanf_t::read(f, val))
+            {
+                return std::nullopt;
+            }
+            fscanf(f, "\n");
+
+            matrix.set(i, (im - 1), (jm - 1), val);
+
+            if (mm_is_symmetric(matcode))
+            {
+                i++;
+                matrix.set(i, (jm - 1), (im - 1), val);
             }
         }
 
@@ -284,7 +367,7 @@ namespace matrix
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
     Matrix<T> times(int size, T n)
     {
-        return times_offset(size, n, 0);
+        return times(size, n, 0);
     }
 
     template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
@@ -323,6 +406,47 @@ namespace matrix
         }
         return matrix;
     }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    SparseMatrix<T> sparse_times(int size, T n, int top_offsett)
+    {
+        SparseMatrix<T> matrix(size, size, size - top_offsett);
+        for (auto i = 0; i < size - top_offsett; i++)
+        {
+            matrix.set(i, i + top_offsett, i, n);
+        }
+        return matrix;
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    SparseMatrix<T> sparse_times(int size, T n)
+    {
+        return sparse_times(size, n, 0);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    SparseMatrix<T> sparse_identity(int size)
+    {
+        return sparse_times(size, (T)1);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    SparseMatrix<T> sparse_identity(int size, int top_offset)
+    {
+        return sparse_times(size, (T)1, top_offset);
+    }
+
+    template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+    SparseMatrix<T> sparse_identity_from_iterator(vector<T> vec)
+    {
+        SparseMatrix<T> matrix(vec.size(), vec.size(), vec.size());
+        for (size_t i = 0; i < vec.size(); i++)
+        {
+            matrix.set(i, i, i, vec[i]);
+        }
+        return matrix;
+    }
+
 }
 
 #endif
