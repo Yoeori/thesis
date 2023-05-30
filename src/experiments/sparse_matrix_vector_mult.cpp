@@ -10,6 +10,7 @@
 #include <poplar/Program.hpp>
 #include <popops/ElementWise.hpp>
 #include <popops/codelets.hpp>
+#include <popops/Reduce.hpp>
 
 #include "../matrix.hpp"
 #include "../config.cpp"
@@ -29,6 +30,11 @@ using ::poplar::program::Execute;
 using ::poplar::program::Program;
 using ::poplar::program::Repeat;
 using ::poplar::program::Sequence;
+
+using ::popops::SingleReduceOp;
+using ::popops::reduceMany;
+
+const bool USE_POPLIBS_REDUCE = true;
 
 namespace exp_spmv
 {
@@ -64,7 +70,8 @@ namespace exp_spmv
 
             // First we calculate how many blocks we have available. We need x tiles for summation and x^2 blocks for the SpMV
             // In general this _should_ make it possible to execute SpMV on the same matrix twice with differents vectors.
-            const auto blocks = (int)std::floor((-1.0 + std::sqrt(1 + 4 * num_tiles)) / 2.0); // For a standard IPU 37*37
+            // const auto blocks = (int)std::floor((-1.0 + std::sqrt(1 + 4 * num_tiles)) / 2.0); // For a standard IPU 37*37
+            const auto blocks = (int) std::floor(std::sqrt(num_tiles));
             const auto block_size_col = std::max(matrix.cols() / blocks + (matrix.cols() % blocks != 0), 1);
             const auto block_size_row = std::max(matrix.rows() / blocks + (matrix.rows() % blocks != 0), 1);
 
@@ -126,7 +133,7 @@ namespace exp_spmv
 
             // Input/Output vector
             tensors["vector"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.n}, "vector");
-            tensors["res"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.blocks * ipu_matrix.blocks * ipu_matrix.block_height}, "result");
+            tensors["res"] = graph.addVariable(FLOAT, {ipu_matrix.blocks, ipu_matrix.blocks, ipu_matrix.block_height}, "result");
 
             // We build the compute set for the MatrixBlock codelet
             auto spmv_cs = graph.addComputeSet("spmv");
@@ -141,7 +148,7 @@ namespace exp_spmv
                         {"idx", tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
                         {"row_idx", tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1))},
                         {"vec", tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height))},
-                        {"res", tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height)}
+                        {"res", tensors["res"][y][x]}
                     });
 
                     // TODO need to be calculated;
@@ -152,7 +159,7 @@ namespace exp_spmv
                     graph.setTileMapping(tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
                     graph.setTileMapping(tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1)), block_id);
                     graph.setTileMapping(tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height)), block_id);
-                    graph.setTileMapping(tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height), block_id);
+                    graph.setTileMapping(tensors["res"][y][x], block_id);
                 }
             }
 
@@ -160,23 +167,55 @@ namespace exp_spmv
 
             // We build the compute set for addition
             auto reducer_cs = graph.addComputeSet("reduce");
+            poplar::program::Program program_reduce;
 
-            for (unsigned int y = 0; y < ipu_matrix.blocks; y++)
-            {
-                auto v = graph.addVertex(reducer_cs, "ReducerToVector", {
-                    {"res", tensors["res"].slice(y * ipu_matrix.blocks * ipu_matrix.block_height, (y + 1) * ipu_matrix.blocks * ipu_matrix.block_height)},
-                    {"vector", tensors["vector"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))}
-                });
+            if (USE_POPLIBS_REDUCE) {
 
-                graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
-                graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
-                graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
+                auto res_vector_shuffled = tensors["res"].dimShuffle({0, 2, 1});
 
-                graph.setPerfEstimate(v, 100);
-                graph.setTileMapping(v, ipu_matrix.blocks * ipu_matrix.blocks + y);
+                vector<SingleReduceOp> reductions;
+                reductions.reserve(ipu_matrix.m); // One reduction for every row of our matrix
+
+                vector<Tensor> out;
+                out.reserve(ipu_matrix.m);
+
+                for (unsigned int block = 0; block < ipu_matrix.blocks; block++)
+                {
+                    for (unsigned int y = 0; y < ipu_matrix.block_height && block * ipu_matrix.block_height + y < ipu_matrix.m; y++)
+                    {
+                        reductions.push_back(SingleReduceOp {
+                            res_vector_shuffled[block][y], {0}, {popops::Operation::ADD}
+                        });
+
+                        out.push_back(tensors["vector"][block * ipu_matrix.block_height + y]);
+                    }
+                }
+
+                auto p = Sequence{};
+                popops::reduceMany(graph, reductions, out, p);
+                program_reduce = p;
+
+            } else {
+                std::cout << "Using own reducer, this will lead to a slower execution." << std::endl;
+
+                for (unsigned int y = 0; y < ipu_matrix.blocks; y++)
+                {
+                    auto v = graph.addVertex(reducer_cs, "ReducerToVector", {
+                        {"res", tensors["res"][y]},
+                        {"vector", tensors["vector"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))}
+                    });
+
+                    graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
+                    graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
+                    graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
+
+                    graph.setPerfEstimate(v, 100);
+                    graph.setTileMapping(v, ipu_matrix.blocks * y);
+                }
+
+                program_reduce = Execute(reducer_cs);
             }
 
-            auto program_reduce = Execute(reducer_cs);
             programs["main"] = Repeat(
                 loops,
                 Sequence{program_spmv, program_reduce});
@@ -326,8 +365,12 @@ namespace exp_spmv
         }
         // std::cout << std::endl;
 
-        serialize_graph(graph);
-        engine.printProfileSummary(std::cout, OptionFlags{});
+        if (Config::get().debug)
+        {
+            serialize_graph(graph);
+            engine.printProfileSummary(std::cout, OptionFlags{});
+        }
+
         std::cout << "Sum: " << res << std::endl;
 
         return ExpResult(timing_graph_compilation, copy_timing, execution_timing, copyback_timing);
