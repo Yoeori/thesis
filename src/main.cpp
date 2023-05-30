@@ -44,7 +44,9 @@ int main(int argc, char *argv[])
         ("matrix", "The input matrix", cxxopts::value<string>())
         ("h,help", "Print me!")
         ("r,rounds", "Amount of SpMV rounds using the previous result", cxxopts::value<int>()->default_value("1"))
-        ("seed", "Seed used when randomness is involved, otherwise `time(NULL)` is used");
+        ("seed", "Seed used when randomness is involved, otherwise `time(NULL)` is used", cxxopts::value<unsigned int>())
+        ("permutate", "The rows and columns in the matrix are randomized for even work distribution", cxxopts::value<bool>()->default_value("true"))
+        ("own-reducer", "Use own reducer", cxxopts::value<bool>()->default_value("false"));
 
     options.positional_help("[matrix.mtx]");
     options.parse_positional({"matrix", ""});
@@ -60,6 +62,8 @@ int main(int argc, char *argv[])
     Config::get().debug = result.count("debug");
     Config::get().verbose = result.count("verbose");
     Config::get().seed = result.count("seed") ? result["seed"].as<unsigned int>() : time(NULL);
+    Config::get().permutate = result["permutate"].as<bool>();
+    Config::get().own_reducer = result["own-reducer"].as<bool>();
     
     // We read in the matrix
     // FILE* matrix_file = fopen(result["matrix"].as<string>().c_str(), "r");
@@ -84,6 +88,12 @@ int main(int argc, char *argv[])
     {
         std::cerr << "Something wen't wrong reading the input matrix, exiting" << std::endl;
         return EXIT_FAILURE;
+    }
+
+    if (Config::get().permutate)
+    {
+        std::cout << "Permutating matrix" << std::endl;
+        (*mtx).permutate(); // The applied permutation is stored in the matrix
     }
 
     std::cout << "Finished reading matrix." << std::endl;

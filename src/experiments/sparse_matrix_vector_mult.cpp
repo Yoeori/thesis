@@ -34,8 +34,6 @@ using ::poplar::program::Sequence;
 using ::popops::SingleReduceOp;
 using ::popops::reduceMany;
 
-const bool USE_POPLIBS_REDUCE = true;
-
 namespace exp_spmv
 {
 
@@ -169,7 +167,7 @@ namespace exp_spmv
             auto reducer_cs = graph.addComputeSet("reduce");
             poplar::program::Program program_reduce;
 
-            if (USE_POPLIBS_REDUCE) {
+            if (!Config::get().own_reducer) {
 
                 auto res_vector_shuffled = tensors["res"].dimShuffle({0, 2, 1});
 

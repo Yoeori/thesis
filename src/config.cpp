@@ -7,6 +7,9 @@ public:
     bool verbose;
     unsigned int seed;
 
+    bool permutate;
+    bool own_reducer;
+
     static Config& get() {
         static Config instance;
         return instance;
