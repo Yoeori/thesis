@@ -8,6 +8,7 @@
 #include <poputil/TileMapping.hpp>
 #include <poplar/DeviceManager.hpp>
 #include <poplar/Program.hpp>
+#include <poplar/CycleCount.hpp>
 #include <popops/ElementWise.hpp>
 #include <popops/codelets.hpp>
 #include <popops/Reduce.hpp>
@@ -15,12 +16,14 @@
 #include "../matrix.hpp"
 #include "../config.cpp"
 #include "../ipu.cpp"
+#include "../report.cpp"
 
 using ::poplar::Device;
 using ::poplar::Engine;
 using ::poplar::Graph;
 using ::poplar::Tensor;
 using ::poplar::OptionFlags;
+using ::poplar::SyncType;
 
 using ::poplar::FLOAT;
 using ::poplar::INT;
@@ -214,9 +217,17 @@ namespace exp_spmv
                 program_reduce = Execute(reducer_cs);
             }
 
-            programs["main"] = Repeat(
+            auto main_sequence = Sequence{Repeat(
                 loops,
-                Sequence{program_spmv, program_reduce});
+                Sequence{program_spmv, program_reduce})};
+
+            if (!Config::get().model)
+            {
+                auto timing = poplar::cycleCount(graph, main_sequence, 0, SyncType::INTERNAL, "timer");
+                graph.createHostRead("readTimer", timing, true);
+            }
+
+            programs["main"] = main_sequence;
         }
 
         auto build_data_streams(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, IPUMatrix<float> &ipu_matrix)
@@ -253,19 +264,7 @@ namespace exp_spmv
         }
     }
 
-    struct ExpResult
-    {
-        ExpResult(double timing_graph_compilation, double timing_copy, double timing_execute, double timing_copyres) : timing_graph_compilation(timing_graph_compilation), timing_copy(timing_copy), timing_execute(timing_execute), timing_copyres(timing_copyres)
-        {
-        }
-
-        double timing_graph_compilation;
-        double timing_copy;
-        double timing_execute;
-        double timing_copyres;
-    };
-
-    optional<ExpResult> execute(const Device &device, matrix::Matrix<float> &matrix, int rounds)
+    optional<ExperimentReportIPU> execute(const Device &device, matrix::Matrix<float> &matrix, int rounds)
     {
         std::cout << "Executing Sparse Matrix Vector multiplication experiment.." << std::endl;
 
@@ -347,7 +346,14 @@ namespace exp_spmv
         auto execution_end = std::chrono::high_resolution_clock::now();
         auto execution_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(execution_end - execution_start).count() / 1e3;
 
-        std::cout << "Copying back result\n";
+        vector<unsigned long> ipuTimer(1);
+        if (!Config::get().model)
+        {
+            engine.readTensor("readTimer", ipuTimer.data(), &*ipuTimer.end());
+            std::cout << "Timing read: " << ipuTimer[0] << std::endl;
+        }
+
+        std::cout << "Copying back result\n"; 
 
         auto copyback_timing_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_host"], "copy result");
@@ -363,14 +369,23 @@ namespace exp_spmv
         }
         // std::cout << std::endl;
 
-        if (Config::get().debug)
-        {
-            serialize_graph(graph);
-            engine.printProfileSummary(std::cout, OptionFlags{});
-        }
+
 
         std::cout << "Sum: " << res << std::endl;
 
-        return ExpResult(timing_graph_compilation, copy_timing, execution_timing, copyback_timing);
+        std::cout << timing_graph_compilation << " " << copy_timing << " " << execution_timing << " " << copyback_timing << std::endl;
+
+        // setup result report
+        auto report = ExperimentReportIPU(std::move(engine), std::move(graph));
+        report.set_timing("copy", copy_timing);
+        report.set_timing("execution", execution_timing);
+        report.set_timing("copy_back", copyback_timing);
+
+        if (!Config::get().model)
+        {
+            report.set_timing("ipu_report", ipuTimer[0] / device.getTarget().getTileClockFrequency());
+        }
+
+        return optional(std::move(report));
     }
 }

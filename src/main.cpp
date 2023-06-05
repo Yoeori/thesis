@@ -12,6 +12,7 @@
 #include "config.cpp"
 #include "ipu.cpp"
 #include "cpu.cpp"
+#include "report.cpp"
 
 #include "experiments/sparse_matrix_vector_mult.cpp"
 #include "experiments/breadth_first_search.cpp"
@@ -90,7 +91,7 @@ int main(int argc, char *argv[])
     Config::get().seed = result.count("seed") ? result["seed"].as<unsigned int>() : time(NULL);
     Config::get().permutate = result["permutate"].as<bool>();
     Config::get().own_reducer = result["own-reducer"].as<bool>();
-    
+    Config::get().model = result.count("model");
     // We read in the matrix
     // FILE* matrix_file = fopen(result["matrix"].as<string>().c_str(), "r");
 

@@ -10,6 +10,8 @@ public:
     bool permutate;
     bool own_reducer;
 
+    bool model;
+
     static Config& get() {
         static Config instance;
         return instance;

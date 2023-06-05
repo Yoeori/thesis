@@ -1,5 +1,6 @@
 [requires]
 cxxopts/3.0.0
+nlohmann_json/3.9.1
 
 [generators]
 cmake
