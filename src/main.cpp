@@ -32,6 +32,24 @@ std::string string_format( const std::string& format, Args ... args )
     return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
 }
 
+optional<ExperimentReportIPU> execute_experiment(const poplar::Device & device, string exp, matrix::Matrix<float> matrix, int rounds)
+{
+    if (exp == "bfs")
+    {
+        return exp_spmv::execute(device, matrix, rounds);
+    } 
+    else if (exp == "prims")
+    {
+        return exp_spmv::execute(device, matrix, rounds);
+    }
+    else if (exp == "spmv")
+    {
+        return exp_spmv::execute(device, matrix, rounds);
+    }
+
+    throw "Unavailable experiment called";
+}
+
 int main(int argc, char *argv[])
 {
 
@@ -46,7 +64,8 @@ int main(int argc, char *argv[])
         ("r,rounds", "Amount of SpMV rounds using the previous result", cxxopts::value<int>()->default_value("1"))
         ("seed", "Seed used when randomness is involved, otherwise `time(NULL)` is used", cxxopts::value<unsigned int>())
         ("permutate", "The rows and columns in the matrix are randomized for even work distribution", cxxopts::value<bool>()->default_value("true"))
-        ("own-reducer", "Use own reducer", cxxopts::value<bool>()->default_value("false"));
+        ("own-reducer", "Use own reducer", cxxopts::value<bool>()->default_value("false"))
+        ("e,experiment", "The experiment to run, options: spmv, bfs, prims", cxxopts::value<string>()->default_value("spmv"));
 
     options.positional_help("[matrix.mtx]");
     options.parse_positional({"matrix", ""});
@@ -57,6 +76,13 @@ int main(int argc, char *argv[])
     {
         std::cout << options.help() << std::endl;
         return EXIT_SUCCESS;
+    }
+
+    auto experiment = result["experiment"].as<string>();
+    if (experiment != "spmv" && experiment != "bfs" && experiment != "prims")
+    {
+        std::cout << "No valid options for experiment were given (" << experiment << "), please use one of the following: spmv, bfs, prims" << std::endl;
+        return EXIT_FAILURE;
     }
 
     Config::get().debug = result.count("debug");
@@ -97,10 +123,9 @@ int main(int argc, char *argv[])
     }
 
     std::cout << "Finished reading matrix." << std::endl;
-    // mtx.value().shuffle();
 
     // We setup the base IPU functionality:
-    // 1. Connect to an IPU
+    // Connect to an IPU
     std::cout << "Setting up IPU device." << std::endl;
     optional<poplar::Device> device;
 
@@ -120,30 +145,21 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    // Perform SpMV experiment
-    auto rounds = result["rounds"].as<int>();
-    exp_spmv::execute(device.value(), *mtx, rounds);
+    // Perform experiment
+    optional<ExperimentReportIPU> exp_result = execute_experiment(*device, experiment, *mtx, result["rounds"].as<int>());
 
-    // if (Config::get().debug)
-    // {
-    //     serialize_graph(res.value().graph);
-    //     res.value().engine.printProfileSummary(std::cout, OptionFlags{});
-    // }
+    if (!exp_result.has_value())
+    {
+        std::cout << "Something went wrong during execution of the experiment" << std::endl;
+        return EXIT_FAILURE;
+    }
 
-    // std::cout << "Resulting vector:\n";
-    // long int res = 0;
-    // for (auto v : result_vec)
-    // {
-    //     // std::cout << v << ", ";
-    //     res += static_cast<long int>(v);
-    // }
-    // // std::cout << std::endl;
-    // std::cout << "Sum: " << res << std::endl;
-    
-    // std::cout << "Sum: " << std::accumulate(result_vec.begin(), result_vec.end(), decltype(result_vec)::value_type(0)) << "\n";
-
-    // Perform calculation locally on CPU, and check results.
-
+    if (Config::get().debug)
+    {
+        serialize_graph(exp_result.value().graph);
+        exp_result.value().engine.printProfileSummary(std::cout, OptionFlags{});
+        std::cout << exp_result.value().to_json().dump() << std::endl;
+    }
 
     return 0;
 }
