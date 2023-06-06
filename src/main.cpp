@@ -160,8 +160,9 @@ int main(int argc, char *argv[])
     {
         serialize_graph(exp_result.value().graph);
         exp_result.value().engine.printProfileSummary(std::cout, OptionFlags{});
-        std::cout << exp_result.value().to_json().dump() << std::endl;
     }
+
+    std::cout << exp_result.value().to_json().dump() << std::endl;
 
     return 0;
 }

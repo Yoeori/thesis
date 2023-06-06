@@ -442,6 +442,7 @@ namespace exp_spmv
         report.set_timing("copy", copy_timing);
         report.set_timing("execution", execution_timing);
         report.set_timing("copy_back", copyback_timing);
+        report.set_timing("graph_compilation", timing_graph_compilation);
 
         if (!Config::get().model)
         {
