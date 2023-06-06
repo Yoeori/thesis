@@ -130,7 +130,7 @@ namespace exp_spmv
             // Static Matrix data
             tensors["matrix"] = graph.addVariable(FLOAT, {ipu_matrix.matrix.size()}, "matrix");
             tensors["idx"] = graph.addVariable(INT, {ipu_matrix.idx.size()}, "idx");
-            tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.row_idx.size()}, "row_idx");
+            tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.blocks, ipu_matrix.blocks, ipu_matrix.block_height + 1}, "row_idx");
 
             // Input/Output vector
             tensors["vector"] = graph.addVariable(FLOAT, {(unsigned int)ipu_matrix.n}, "vector");
@@ -147,7 +147,7 @@ namespace exp_spmv
                     auto v = graph.addVertex(spmv_cs, "MatrixBlock", {
                         {"matrix", tensors["matrix"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
                         {"idx", tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
-                        {"row_idx", tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1))},
+                        {"row_idx", tensors["row_idx"][y][x]},
                         {"vec", tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height))},
                         {"res", tensors["res"][y][x]}
                     });
@@ -158,7 +158,7 @@ namespace exp_spmv
 
                     graph.setTileMapping(tensors["matrix"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
                     graph.setTileMapping(tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
-                    graph.setTileMapping(tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1)), block_id);
+                    graph.setTileMapping(tensors["row_idx"][y][x], block_id);
                     graph.setTileMapping(tensors["vector"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height)), block_id);
                     graph.setTileMapping(tensors["res"][y][x], block_id);
                 }
