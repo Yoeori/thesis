@@ -124,6 +124,70 @@ namespace exp_spmv
             return IPUMatrix(offsets, ipu_matrix, idx, row_idx, blocks, block_size_row, matrix.rows(), matrix.cols());
         }
 
+        template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+        auto prepare_data(matrix::SparseMatrix<T> matrix, const int num_tiles)
+        {
+            const auto blocks = (int) std::floor(std::sqrt(num_tiles));
+            const auto block_size_col = std::max(matrix.cols() / blocks + (matrix.cols() % blocks != 0), 1);
+            const auto block_size_row = std::max(matrix.rows() / blocks + (matrix.rows() % blocks != 0), 1);
+
+            // This will give the offsets for matrix and idx
+            vector<int> offsets(blocks * blocks + 1, 0);
+            vector<int> row_idx(blocks * blocks * (block_size_row + 1), 0);
+
+            // We go through each value in the SpM and update offsets and row_idx
+            for (auto o = 0; o < matrix.nonzeroes(); o++)
+            {
+                auto [i, j, v] = matrix.get(o);
+                (void)v;
+
+                auto x = j / block_size_col;
+                auto y = i / block_size_row;
+
+                offsets[y * blocks + x + 1]++;
+                row_idx[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y)) + 1]++;
+            }
+
+            // Stride offsets and row_idx
+            for (size_t i = 2; i < offsets.size(); i++)
+            {
+                offsets[i] += offsets[i - 1];
+            }
+
+            for (auto block = 0; block < blocks * blocks; block++)
+            {
+                for (auto i = 0; i < block_size_row; i++)
+                {
+                    row_idx[block * (block_size_row + 1) + i + 1] += row_idx[block * (block_size_row + 1) + i];
+                }
+            }
+
+            assert(offsets[offsets.size() - 1] == matrix.nonzeroes());
+
+            vector<int> cursor(row_idx); // Cursor inside a block between rows
+
+            vector<T> ipu_matrix(matrix.nonzeroes(), 5000);
+            vector<int> idx(matrix.nonzeroes(), 5000);
+
+            for (auto o = 0; o < matrix.nonzeroes(); o++)
+            {
+                auto [i, j, v] = matrix.get(o);
+
+                auto x = j / block_size_col;
+                auto y = i / block_size_row;
+
+                size_t value_offset = offsets[y * blocks + x] + cursor[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y))];
+
+                ipu_matrix[value_offset] = v;
+                idx[value_offset] = j - (block_size_col * x);
+
+                // Update cursor
+                cursor[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y))]++;
+            }
+
+            return IPUMatrix(offsets, ipu_matrix, idx, row_idx, blocks, block_size_row, matrix.rows(), matrix.cols());
+        }
+
         void build_compute_graph(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, const int num_tiles, IPUMatrix<float> &ipu_matrix, const int loops)
         {
 
@@ -264,7 +328,7 @@ namespace exp_spmv
         }
     }
 
-    optional<ExperimentReportIPU> execute(const Device &device, matrix::Matrix<float> &matrix, int rounds)
+    optional<ExperimentReportIPU> execute(const Device &device, matrix::SparseMatrix<float> &matrix, int rounds)
     {
         std::cout << "Executing Sparse Matrix Vector multiplication experiment.." << std::endl;
 
@@ -372,8 +436,6 @@ namespace exp_spmv
 
 
         std::cout << "Sum: " << res << std::endl;
-
-        std::cout << timing_graph_compilation << " " << copy_timing << " " << execution_timing << " " << copyback_timing << std::endl;
 
         // setup result report
         auto report = ExperimentReportIPU(std::move(engine), std::move(graph));

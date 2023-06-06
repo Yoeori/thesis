@@ -33,7 +33,7 @@ std::string string_format( const std::string& format, Args ... args )
     return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
 }
 
-optional<ExperimentReportIPU> execute_experiment(const poplar::Device & device, string exp, matrix::Matrix<float> matrix, int rounds)
+optional<ExperimentReportIPU> execute_experiment(const poplar::Device & device, string exp, matrix::SparseMatrix<float> matrix, int rounds)
 {
     if (exp == "bfs")
     {
@@ -92,21 +92,22 @@ int main(int argc, char *argv[])
     Config::get().permutate = result["permutate"].as<bool>();
     Config::get().own_reducer = result["own-reducer"].as<bool>();
     Config::get().model = result.count("model");
+
     // We read in the matrix
-    // FILE* matrix_file = fopen(result["matrix"].as<string>().c_str(), "r");
+    FILE* matrix_file = fopen(result["matrix"].as<string>().c_str(), "r");
 
-    // if (matrix_file == nullptr) {
-    //     std::cerr << "Something wen't wrong opening the input matrix, exiting" << std::endl;
-    //     return EXIT_FAILURE;
-    // }
+    if (matrix_file == nullptr) {
+        std::cerr << "Something wen't wrong opening the input matrix, exiting" << std::endl;
+        return EXIT_FAILURE;
+    }
 
-    // std::cout << "Reading matrix..." << std::endl;
-    // auto mtx = matrix::read_matrix_market<float>(matrix_file);
-    // fclose(matrix_file);
+    std::cout << "Reading matrix..." << std::endl;
+    auto mtx = matrix::read_matrix_market_sparse<float>(matrix_file);
+    fclose(matrix_file);
 
-    // auto mtx = optional(matrix::identity<float>(1000));
+    // auto mtx = optional(matrix::identity<float>(1000, 1));
     // auto mtx = optional(matrix::times<float>(2000, 2.0));
-    auto mtx = optional(matrix::ones<float>(7000));
+    // auto mtx = optional(matrix::ones<float>(7000));
     // std::vector<float> v(1000);
     // std::iota(std::begin(v), std::end(v), 1);
     // auto mtx = optional(matrix::identity_from_iterator(v));
