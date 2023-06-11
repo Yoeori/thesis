@@ -166,8 +166,8 @@ namespace exp_spmv
 
             vector<int> cursor(row_idx); // Cursor inside a block between rows
 
-            vector<T> ipu_matrix(matrix.nonzeroes(), 5000);
-            vector<int> idx(matrix.nonzeroes(), 5000);
+            vector<T> ipu_matrix(matrix.nonzeroes());
+            vector<int> idx(matrix.nonzeroes());
 
             for (auto o = 0; o < matrix.nonzeroes(); o++)
             {
