@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <assert.h>
 #include <cmath>
-// #include "print.h"
 
 using namespace poplar;
 
@@ -15,7 +14,7 @@ public:
     // Data structure:
     // m[i] = M_(E_t where row_idx[t] >= i and row_idx[t + 1] < i ==> t, idx[i])
     Input<Vector<float>> matrix;
-    Input<Vector<int>> idx; // TODO: Assume our indexes are 'normalized' for the block
+    Input<Vector<int>> idx;
     Input<Vector<int>> row_idx;
 
     Input<Vector<float>> vec;

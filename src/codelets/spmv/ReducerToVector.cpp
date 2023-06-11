@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <assert.h>
 #include <cmath>
-// #include "print.h"
 
 using namespace poplar;
 
@@ -20,7 +19,6 @@ public:
     Output<Vector<float>> vector;
 
     int block_length;
-    int res_block_length;
     int blocks;
 
     auto compute(unsigned workerId) -> bool

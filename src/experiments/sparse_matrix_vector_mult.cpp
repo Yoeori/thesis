@@ -271,7 +271,6 @@ namespace exp_spmv
                     });
 
                     graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
-                    graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
                     graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
 
                     graph.setPerfEstimate(v, 100);
