@@ -37,7 +37,7 @@ optional<ExperimentReportIPU> execute_experiment(const poplar::Device & device, 
 {
     if (exp == "bfs")
     {
-        return exp_spmv::execute(device, matrix, rounds);
+        return exp_bfs::execute(device, matrix);
     } 
     else if (exp == "prims")
     {

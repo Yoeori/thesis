@@ -17,7 +17,7 @@ public:
     Input<Vector<int>> row_idx;
 
     Input<Vector<bool>> frontier;
-    Output<Vector<bool>> res;
+    Output<Vector<unsigned int>> res;
 
     auto compute(unsigned workerId) -> bool
     {
@@ -25,10 +25,12 @@ public:
         // Go by row
         for (auto i = workerId; i < row_idx.size() - 1; i+= MultiVertex::numWorkers())
         {
+            res[i] = 0;
             for (auto j = row_idx[i]; j < row_idx[i + 1]; j++)
             {
-                if (frontier[idx[j]]) {
-                    res[i] = true;
+                if (frontier[idx[j]]) 
+                {
+                    res[i] = 1;
                     goto cnt;
                 }
             }

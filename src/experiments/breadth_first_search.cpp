@@ -1,18 +1,24 @@
+#include <iostream>
 #include <cstdlib>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <limits.h>
 
 #include <poplar/Engine.hpp>
 #include <poputil/TileMapping.hpp>
 #include <poplar/DeviceManager.hpp>
 #include <poplar/Program.hpp>
+#include <poplar/ArrayRef.hpp>
 #include <popops/ElementWise.hpp>
+#include <popops/AllTrue.hpp>
 #include <popops/codelets.hpp>
 #include <popops/Loop.hpp>
 
 #include "../matrix.hpp"
 #include "../config.cpp"
 #include "../ipu.cpp"
+#include "../report.cpp"
 
 using ::poplar::Device;
 using ::poplar::Engine;
@@ -26,6 +32,7 @@ using ::poplar::UNSIGNED_INT;
 using ::poplar::BOOL;
 
 using ::poplar::program::Copy;
+using ::poplar::program::RepeatWhileFalse;
 using ::poplar::program::Execute;
 using ::poplar::program::Program;
 using ::poplar::program::Repeat;
@@ -34,8 +41,6 @@ using ::poplar::program::PrintTensor;
 
 namespace exp_bfs
 {
-    const int MAX_ITERATIONS = 5000;
-
     // Helper functions for experiment
     namespace
     {
@@ -59,58 +64,66 @@ namespace exp_bfs
             unsigned int frontier;
         };
 
-        auto prepare_data(matrix::Matrix<float> matrix, const int num_tiles)
+        template <typename T, typename = typename std::enable_if<std::is_arithmetic<T>::value, T>::type>
+        auto prepare_data(matrix::SparseMatrix<T> matrix, const int num_tiles)
         {
-            // assumptions at this point in the code: matrix is shuffled (values are normally divided)
-            // TODO: prepareData currently takes O(n*m), can be done in O(nz) for SparseMatrix type
-
-            // First we calculate how many blocks we have available. We need x tiles for summation and x^2 blocks for the SpMV
-            // In general this _should_ make it possible to execute SpMV on the same matrix twice with differents vectors.
-            const auto blocks = (int)std::floor((-1.0 + std::sqrt(1 + 4 * num_tiles)) / 2.0); // For a standard IPU 37*37
+            const auto blocks = (int) std::floor(std::sqrt(num_tiles));
             const auto block_size_col = std::max(matrix.cols() / blocks + (matrix.cols() % blocks != 0), 1);
             const auto block_size_row = std::max(matrix.rows() / blocks + (matrix.rows() % blocks != 0), 1);
 
-            vector<int> idx(matrix.nonzeroes());
-
-            // Could be more compact (the last row might need less space), but this complicates location calculations _a lot_
-            vector<int> row_idx(blocks * blocks * (block_size_row + 1));
-
-            // Next we perform summation over the matrix to find exact length for each block
-            // TODO: we should/could log normality of sparse matrix
-            // In general the row_idx length is the same for each block, with the expection of the last row of blocks. (being ceil(matrix.m / blocks))
-
             // This will give the offsets for matrix and idx
-            vector<int> offsets(blocks * blocks + 1);
-            offsets[0] = 0;
+            vector<int> offsets(blocks * blocks + 1, 0);
+            vector<int> row_idx(blocks * blocks * (block_size_row + 1), 0);
 
-            for (auto y = 0; y < blocks; y++)
+            // We go through each value in the SpM and update offsets and row_idx
+            for (auto o = 0; o < matrix.nonzeroes(); o++)
             {
-                for (auto x = 0; x < blocks; x++)
+                auto [i, j, v] = matrix.get(o);
+                (void)v;
+
+                auto x = j / block_size_col;
+                auto y = i / block_size_row;
+
+                offsets[y * blocks + x + 1]++;
+                row_idx[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y)) + 1]++;
+            }
+
+            // Stride offsets and row_idx
+            for (size_t i = 2; i < offsets.size(); i++)
+            {
+                offsets[i] += offsets[i - 1];
+            }
+
+            for (auto block = 0; block < blocks * blocks; block++)
+            {
+                for (auto i = 0; i < block_size_row; i++)
                 {
-                    offsets[y * blocks + x + 1] = offsets[y * blocks + x];
-
-                    // Search block for non-zero
-                    for (auto mi = block_size_row * y; mi < std::min(block_size_row * (y + 1), matrix.rows()); mi++)
-                    {
-                        // Record row offsets
-                        row_idx[(y * blocks + x) * (block_size_row + 1) + mi - block_size_row * y] = offsets[y * blocks + x + 1] - offsets[y * blocks + x];
-
-                        for (auto mj = block_size_col * x; mj < std::min(block_size_col * (x + 1), matrix.cols()); mj++)
-                        {
-                            if (matrix.get(mi, mj) != 0)
-                            {
-                                idx[offsets[y * blocks + x + 1]] = mj - block_size_col * x;
-                                offsets[y * blocks + x + 1] += 1;
-                            }
-                        }
-                    }
-
-                    row_idx[(y * blocks + x) * (block_size_row + 1) + std::min(block_size_row * (y + 1), matrix.rows()) - block_size_row * y] = offsets[y * blocks + x + 1] - offsets[y * blocks + x];
+                    row_idx[block * (block_size_row + 1) + i + 1] += row_idx[block * (block_size_row + 1) + i];
                 }
             }
 
-            // Final value should be nz (sum of every block)
             assert(offsets[offsets.size() - 1] == matrix.nonzeroes());
+
+            vector<int> cursor(row_idx); // Cursor inside a block between rows
+
+            vector<T> ipu_matrix(matrix.nonzeroes());
+            vector<int> idx(matrix.nonzeroes());
+
+            for (auto o = 0; o < matrix.nonzeroes(); o++)
+            {
+                auto [i, j, v] = matrix.get(o);
+
+                auto x = j / block_size_col;
+                auto y = i / block_size_row;
+
+                size_t value_offset = offsets[y * blocks + x] + cursor[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y))];
+
+                ipu_matrix[value_offset] = v;
+                idx[value_offset] = j - (block_size_col * x);
+
+                // Update cursor
+                cursor[(y * blocks + x) * (block_size_row + 1) + (i - (block_size_row * y))]++;
+            }
 
             unsigned int frontier = 0;
 
@@ -125,27 +138,28 @@ namespace exp_bfs
         {
             // Static Matrix data
             tensors["idx"] = graph.addVariable(INT, {ipu_matrix.idx.size()}, "idx");
-            tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.row_idx.size()}, "row_idx");
+            tensors["row_idx"] = graph.addVariable(INT, {ipu_matrix.blocks, ipu_matrix.blocks, ipu_matrix.block_height + 1}, "row_idx");
 
             // Input/Output vector
             tensors["frontier"] = graph.addVariable(BOOL, {(unsigned int)ipu_matrix.n}, "frontier");
-            
             graph.setInitialValue(tensors["frontier"].slice(0, ipu_matrix.n), poplar::ArrayRef(vector<int>(ipu_matrix.n, 0)));
-
-
-            graph.setInitialValue(tensors["frontier"][0], true); // our first frontier value is always node 0 (col 0), we need to apply a permutation if we have used one
+            graph.setInitialValue(tensors["frontier"][ipu_matrix.frontier], true); // our first frontier value is always node 0 (col 0)
 
             tensors["dist"] = graph.addVariable(UNSIGNED_INT, {(unsigned int)ipu_matrix.n}, "dist");
-            poputil::mapTensorLinearly(graph, tensors["dist"]);
+            graph.setInitialValue(tensors["dist"], poplar::ArrayRef(vector<int>(ipu_matrix.n, INT_MAX)));
+            graph.setInitialValue(tensors["dist"][ipu_matrix.frontier], 0);
 
-            tensors["res"] = graph.addVariable(BOOL, {(unsigned int)ipu_matrix.blocks * ipu_matrix.blocks * ipu_matrix.block_height}, "result");
-            poputil::mapTensorLinearly(graph, tensors["res"]);
+            // There seem to be memory issues when using booleans for such big data structures. We therefore use unsigned int instead
+            // This does result in 4x more memory use
+            tensors["res"] = graph.addVariable(UNSIGNED_INT, {ipu_matrix.blocks, ipu_matrix.blocks, ipu_matrix.block_height}, "result");
 
+            // Loop tensors
             tensors["iteration"] = graph.addVariable(UNSIGNED_INT, {1}, "iteration");
-            graph.setTileMapping(tensors["iteration"], ipu_matrix.blocks * ipu_matrix.blocks);
+            graph.setTileMapping(tensors["iteration"], 0);
+            graph.setInitialValue(tensors["iteration"][0], 1);
 
-            tensors["max_iteration"] = graph.addConstant<int>(UNSIGNED_INT, {1}, {MAX_ITERATIONS}, "max_iteration");
-            graph.setTileMapping(tensors["max_iteration"], ipu_matrix.blocks * ipu_matrix.blocks);
+            tensors["stop"] = graph.addVariable(BOOL, {ipu_matrix.blocks}, "stop condition");
+            graph.setInitialValue(tensors["stop"], false);
 
             // We build the compute set for the MatrixBlock codelet
             auto spmv_cs = graph.addComputeSet("spmv");
@@ -157,18 +171,19 @@ namespace exp_bfs
                     auto block_id = y * ipu_matrix.blocks + x;
                     auto v = graph.addVertex(spmv_cs, "MatrixBlockBFS", {
                         {"idx", tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1])},
-                        {"row_idx", tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1))},
-                        {"frontier", tensors["frontier"]},
-                        {"res", tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height)}
+                        {"row_idx", tensors["row_idx"][y][x]},
+                        {"frontier", tensors["frontier"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height))},
+                        {"res", tensors["res"][y][x]}
                     });
 
                     // TODO need to be calculated;
                     graph.setPerfEstimate(v, 100);
                     graph.setTileMapping(v, block_id);
 
-                    // graph.setTileMapping(tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
-                    // graph.setTileMapping(tensors["row_idx"].slice((y * ipu_matrix.blocks + x) * (ipu_matrix.block_height + 1), (y * ipu_matrix.blocks + x + 1) * (ipu_matrix.block_height + 1)), block_id);
-                    // graph.setTileMapping(tensors["res"].slice(block_id * ipu_matrix.block_height, (block_id + 1) * ipu_matrix.block_height), block_id);
+                    graph.setTileMapping(tensors["idx"].slice(ipu_matrix.offsets[block_id], ipu_matrix.offsets[block_id + 1]), block_id);
+                    graph.setTileMapping(tensors["row_idx"][y][x], block_id);
+                    graph.setTileMapping(tensors["frontier"].slice(std::min(ipu_matrix.m, x * ipu_matrix.block_height), std::min(ipu_matrix.m, (x + 1) * ipu_matrix.block_height)), block_id);
+                    graph.setTileMapping(tensors["res"][y][x], block_id);
                 }
             }
 
@@ -176,45 +191,50 @@ namespace exp_bfs
             auto reducer_cs = graph.addComputeSet("reduce");
 
             for (unsigned int y = 0; y < ipu_matrix.blocks; y++) {
+
+                auto block = y * ipu_matrix.blocks;
                 
                 auto v = graph.addVertex(reducer_cs, "ReducerBFS", {
-                    {"res", tensors["res"].slice(y * ipu_matrix.blocks * ipu_matrix.block_height, (y + 1) * ipu_matrix.blocks * ipu_matrix.block_height)},
-                    {"next_frontier", tensors["frontier"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))},
+                    {"res", tensors["res"][y]},
+                    {"frontier", tensors["frontier"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))},
                     {"dist", tensors["dist"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height))},
-                    {"iteration", tensors["iteration"][0]}
+                    {"iteration", tensors["iteration"][0]},
+                    {"stop", tensors["stop"][y]}
                 });
 
                 graph.setInitialValue(v["block_length"], std::min((int)ipu_matrix.block_height, std::max(0, (int)ipu_matrix.m - (int)ipu_matrix.block_height * (int)y)));
-                graph.setInitialValue(v["res_block_length"], ipu_matrix.block_height); // TODO not necessary if we compute res better
                 graph.setInitialValue(v["blocks"], ipu_matrix.blocks);
 
                 graph.setPerfEstimate(v, 100);
-                graph.setTileMapping(v, ipu_matrix.blocks * ipu_matrix.blocks + y);
-                // graph.setTileMapping(tensors["dist"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height)), ipu_matrix.blocks * ipu_matrix.blocks + y);
+                graph.setTileMapping(v, block);
+                graph.setTileMapping(tensors["dist"].slice(std::min(ipu_matrix.m, y * ipu_matrix.block_height), std::min(ipu_matrix.m, (y + 1) * ipu_matrix.block_height)), block);
+                graph.setTileMapping(tensors["stop"][y], block);
             }
 
-            programs["main"] = popops::countedForLoop(graph, tensors["iteration"], 1, tensors["max_iteration"], 1, Sequence{Execute(spmv_cs), Execute(reducer_cs)});
+            // Setup program
+            auto program_sequence = Sequence{};
+
+            popops::mapInPlace(graph, popops::expr::_1 + popops::expr::Const(1), {tensors["iteration"]}, program_sequence, "add 1 to iteration");
+            program_sequence.add(Execute(spmv_cs));
+            program_sequence.add(Execute(reducer_cs));
+
+            tensors["should_stop"] = popops::allTrue(graph, tensors["stop"], program_sequence, "check stop condition");
+
+            programs["main"] = RepeatWhileFalse(Sequence(), tensors["should_stop"], program_sequence);
         }
 
         auto build_data_streams(Graph &graph, map<string, Tensor> &tensors, map<string, Program> &programs, BFS_IPUMatrix &ipu_matrix)
         {
             auto toipu_idx = graph.addHostToDeviceFIFO("toipu_idx", INT, ipu_matrix.idx.size());
             auto toipu_row_idx = graph.addHostToDeviceFIFO("toipu_row_idx", INT, ipu_matrix.row_idx.size());
-            auto toipu_frontier = graph.addHostToDeviceFIFO("toipu_frontier", BOOL, ipu_matrix.n);
-            auto toipu_dist = graph.addHostToDeviceFIFO("toipu_dist", UNSIGNED_INT, ipu_matrix.n);
 
             auto fromipu_dist = graph.addDeviceToHostFIFO("fromipu_dist", UNSIGNED_INT, ipu_matrix.n);
 
             auto copyto_idx = Copy(toipu_idx, tensors["idx"]);
             auto copyto_row_idx = Copy(toipu_row_idx, tensors["row_idx"]);
-            auto copyto_frontier = Copy(toipu_frontier, tensors["frontier"]);
-            auto copyto_dist = Copy(toipu_dist, tensors["dist"]);
-
             auto copyhost_dist = Copy(tensors["dist"], fromipu_dist);
 
             programs["copy_to_ipu_matrix"] = Sequence{copyto_idx, copyto_row_idx};
-            programs["copy_to_ipu_frontier"] = Sequence{copyto_dist, copyto_frontier};
-
             programs["copy_to_host"] = copyhost_dist;
         }
 
@@ -230,14 +250,7 @@ namespace exp_bfs
         }
     }
 
-    // struct ExpResult {
-    //     Graph graph;
-    //     Engine &engine;
-
-    //     ExpResult(Graph g, Engine &e): graph(g), engine(e) {};
-    // };
-
-    auto execute(const Device &device, matrix::Matrix<float> &matrix, int rounds)
+    optional<ExperimentReportIPU> execute(const Device &device, matrix::SparseMatrix<float> &matrix)
     {
         std::cout << "Executing BFS experiment.." << std::endl;
 
@@ -250,7 +263,7 @@ namespace exp_bfs
 
         std::cout << "Building programs.." << std::endl;
 
-        build_compute_graph(graph, tensors, programs, device.getTarget().getNumTiles(), ipu_matrix, rounds);
+        build_compute_graph(graph, tensors, programs, device.getTarget().getNumTiles(), ipu_matrix);
         build_data_streams(graph, tensors, programs, ipu_matrix);
 
         auto ENGINE_OPTIONS = OptionFlags{};
@@ -281,13 +294,8 @@ namespace exp_bfs
             engine.enableExecutionProfiling();
         }
 
-        auto frontier = vector<int>(ipu_matrix.n, false);
-        frontier[0] = 1;
-
         engine.connectStream("toipu_idx", ipu_matrix.idx.data());
         engine.connectStream("toipu_row_idx", ipu_matrix.row_idx.data());
-        engine.connectStream("toipu_frontier", frontier.data());
-        engine.connectStream("toipu_dist", frontier.data());
 
         auto result_vec = vector<int>(ipu_matrix.n);
         engine.connectStream("fromipu_dist", result_vec.data());
@@ -295,7 +303,6 @@ namespace exp_bfs
         // Copy data
         std::cout << "Running programs.." << std::endl;
         engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
-        engine.run(programIds["copy_to_ipu_vec"], "copy vec");
 
         std::cout << "Running main loop.." << std::endl;
         engine.run(programIds["main"], "bfs-spmv");
@@ -303,16 +310,17 @@ namespace exp_bfs
         // Copy result
         engine.run(programIds["copy_to_host"], "copy result");
 
-        std::cout << "Resulting vector:\n";
-        for (auto v : result_vec)
-        {
-            std::cout << v << ", ";
-        }
-        std::cout << std::endl;
+        // std::cout << "Resulting vector:\n";
+        // for (auto v : result_vec)
+        // {
+        //     std::cout << v << ", ";
+        // }
+        // std::cout << std::endl;
 
         serialize_graph(graph);
         engine.printProfileSummary(std::cout, OptionFlags{});
 
-        return graph;
+        auto report = ExperimentReportIPU(std::move(engine), std::move(graph));
+        return optional(std::move(report));
     }
 }

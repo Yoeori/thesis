@@ -6,7 +6,6 @@
 #include <stdint.h>
 #include <assert.h>
 #include <cmath>
-#include "print.h"
 
 using namespace poplar;
 
@@ -18,17 +17,21 @@ public:
 
     InOut<Vector<unsigned int>> dist;
 
-    Input<Vector<bool>> res;
-    Output<Vector<bool>> next_frontier;
+    Vector<Input<Vector<unsigned int>>> res;
+    Output<Vector<bool>> frontier;
 
     Input<unsigned int> iteration;
+    Output<bool> stop;
 
     int block_length;
-    int res_block_length;
     int blocks;
 
     auto compute(unsigned workerId) -> bool
     {
+        if (workerId == 0) {
+            *stop = true;
+        }
+
         for (int i = workerId; i < block_length; i+= MultiVertex::numWorkers())
         {
             if (dist[i] != 0) {
@@ -37,15 +40,15 @@ public:
 
             for (rptsize_t n = 0; n < blocks; n+=1)
             {
-                if (res[n * res_block_length + i]) {
-                    printf("iteration %d found %d\n", *iteration, i);
-                    next_frontier[i] = true;
+                if (res[n][i] == 1) {
+                    frontier[i] = true; 
+                    *stop = false; // Race condition safety: control flow will not be reached before line 35 is executed.
                     dist[i] = iteration;
                     goto cnt;
                 }
             }
 
-            next_frontier[i] = false;
+            frontier[i] = false;
 
             cnt:;
         }
