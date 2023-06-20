@@ -168,6 +168,7 @@ int main(int argc, char *argv[])
     exp_result_json["config"] = Config::get().to_json();
     exp_result_json["matrix"] = result["matrix"].as<string>();
     exp_result_json["rounds"] = result["rounds"].as<int>();
+    exp_result_json["experiment"] = experiment;
 
     std::cout << exp_result_json.dump(2) << std::endl;
 
