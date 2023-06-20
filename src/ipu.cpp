@@ -23,16 +23,16 @@ optional<Device> getIpuDevice(const unsigned int numIpus = 1)
     optional<Device> device = std::nullopt;
     for (auto &d : manager.getDevices(TargetType::IPU, numIpus))
     {
-        std::cout << "Trying to attach to IPU " << d.getId();
+        std::cerr << "Trying to attach to IPU " << d.getId();
         if (d.attach())
         {
-            std::cout << " - attached" << std::endl;
+            std::cerr << " - attached" << std::endl;
             device = {std::move(d)};
             break;
         }
         else
         {
-            std::cout << std::endl
+            std::cerr << std::endl
                       << "Error attaching to device" << std::endl;
         }
     }
