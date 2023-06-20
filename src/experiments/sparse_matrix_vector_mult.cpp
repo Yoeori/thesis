@@ -261,7 +261,7 @@ namespace exp_spmv
                 program_reduce = p;
 
             } else {
-                std::cout << "Using own reducer, this will lead to a slower execution." << std::endl;
+                std::cerr << "Using own reducer, this will lead to a slower execution." << std::endl;
 
                 for (unsigned int y = 0; y < ipu_matrix.blocks; y++)
                 {
@@ -329,11 +329,11 @@ namespace exp_spmv
 
     optional<ExperimentReportIPU> execute(const Device &device, matrix::SparseMatrix<float> &matrix, int rounds)
     {
-        std::cout << "Executing Sparse Matrix Vector multiplication experiment.." << std::endl;
+        std::cerr << "Executing Sparse Matrix Vector multiplication experiment.." << std::endl;
 
         if (rounds != 1 && matrix.rows() != matrix.cols())
         {
-            std::cout << "Multi-round was requested, but not supported by matrix." << std::endl;
+            std::cerr << "Multi-round was requested, but not supported by matrix." << std::endl;
             return std::nullopt;
         }
 
@@ -344,7 +344,7 @@ namespace exp_spmv
 
         auto ipu_matrix = prepare_data(matrix, device.getTarget().getNumTiles());
 
-        std::cout << "Building programs.." << std::endl;
+        std::cerr << "Building programs.." << std::endl;
 
         build_compute_graph(graph, tensors, programs, device.getTarget().getNumTiles(), ipu_matrix, rounds);
         build_data_streams(graph, tensors, programs, ipu_matrix);
@@ -367,7 +367,7 @@ namespace exp_spmv
             index++;
         }
 
-        std::cout << "Compiling graph.." << std::endl;
+        std::cerr << "Compiling graph.." << std::endl;
         
         auto timing_graph_compilation_start = std::chrono::high_resolution_clock::now();
         auto engine = Engine(graph, programsList, ENGINE_OPTIONS);
@@ -393,8 +393,8 @@ namespace exp_spmv
         engine.connectStream("fromipu_vec", result_vec.data());
 
         // Run all programs in order
-        std::cout << "Running programs.." << std::endl;
-        std::cout << "Copy data to IPU\n";
+        std::cerr << "Running programs.." << std::endl;
+        std::cerr << "Copy data to IPU\n";
 
         auto copy_timing_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_ipu_matrix"], "copy matrix");
@@ -402,7 +402,7 @@ namespace exp_spmv
         auto copy_timing_end = std::chrono::high_resolution_clock::now();
         auto copy_timing = std::chrono::duration_cast<std::chrono::nanoseconds>(copy_timing_end - copy_timing_start).count() / 1e3;
 
-        std::cout << "Run main program\n";
+        std::cerr << "Run main program\n";
 
         auto execution_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["main"], "main loop");
@@ -413,10 +413,10 @@ namespace exp_spmv
         if (!Config::get().model)
         {
             engine.readTensor("readTimer", ipuTimer.data(), &*ipuTimer.end());
-            std::cout << "Timing read: " << ipuTimer[0] << std::endl;
+            std::cerr << "Timing read: " << ipuTimer[0] << std::endl;
         }
 
-        std::cout << "Copying back result\n"; 
+        std::cerr << "Copying back result\n"; 
 
         auto copyback_timing_start = std::chrono::high_resolution_clock::now();
         engine.run(programIds["copy_to_host"], "copy result");
@@ -434,7 +434,7 @@ namespace exp_spmv
 
 
 
-        std::cout << "Sum: " << res << std::endl;
+        std::cerr << "Sum: " << res << std::endl;
 
         // setup result report
         auto report = ExperimentReportIPU(std::move(engine), std::move(graph));

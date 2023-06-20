@@ -75,14 +75,14 @@ int main(int argc, char *argv[])
 
     if ((!result.count("matrix") && !result.count("model")) || result.count("help"))
     {
-        std::cout << options.help() << std::endl;
+        std::cerr << options.help() << std::endl;
         return EXIT_SUCCESS;
     }
 
     auto experiment = result["experiment"].as<string>();
     if (experiment != "spmv" && experiment != "bfs" && experiment != "prims")
     {
-        std::cout << "No valid options for experiment were given (" << experiment << "), please use one of the following: spmv, bfs, prims" << std::endl;
+        std::cerr << "No valid options for experiment were given (" << experiment << "), please use one of the following: spmv, bfs, prims" << std::endl;
         return EXIT_FAILURE;
     }
 
@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    std::cout << "Reading matrix..." << std::endl;
+    std::cerr << "Reading matrix..." << std::endl;
     auto mtx = matrix::read_matrix_market_sparse<float>(matrix_file);
     fclose(matrix_file);
 
@@ -120,15 +120,15 @@ int main(int argc, char *argv[])
 
     if (Config::get().permutate)
     {
-        std::cout << "Permutating matrix" << std::endl;
+        std::cerr << "Permutating matrix" << std::endl;
         (*mtx).permutate(); // The applied permutation is stored in the matrix
     }
 
-    std::cout << "Finished reading matrix." << std::endl;
+    std::cerr << "Finished reading matrix." << std::endl;
 
     // We setup the base IPU functionality:
     // Connect to an IPU
-    std::cout << "Setting up IPU device." << std::endl;
+    std::cerr << "Setting up IPU device." << std::endl;
     optional<poplar::Device> device;
 
     if (result.count("model"))
@@ -152,17 +152,24 @@ int main(int argc, char *argv[])
 
     if (!exp_result.has_value())
     {
-        std::cout << "Something went wrong during execution of the experiment" << std::endl;
+        std::cerr << "Something went wrong during execution of the experiment" << std::endl;
         return EXIT_FAILURE;
     }
 
     if (Config::get().debug)
     {
         serialize_graph(exp_result.value().graph);
-        exp_result.value().engine.printProfileSummary(std::cout, OptionFlags{});
+        exp_result.value().engine.printProfileSummary(std::cerr, OptionFlags{});
     }
 
-    std::cout << exp_result.value().to_json().dump() << std::endl;
+    auto exp_result_json = exp_result.value().to_json();
+
+    // We add the command line options given
+    exp_result_json["config"] = Config::get().to_json();
+    exp_result_json["matrix"] = result["matrix"].as<string>();
+    exp_result_json["rounds"] = result["rounds"].as<int>();
+
+    std::cout << exp_result_json.dump(2) << std::endl;
 
     return 0;
 }
