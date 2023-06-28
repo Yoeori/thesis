@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <assert.h>
 #include <cmath>
+#include <limits.h>
 
 using namespace poplar;
 
@@ -17,7 +18,7 @@ public:
 
     InOut<Vector<unsigned int>> dist;
 
-    Vector<Input<Vector<unsigned int>>> res;
+    Vector<Input<Vector<short>>> res;
     Output<Vector<bool>> frontier;
 
     Input<unsigned int> iteration;
@@ -34,7 +35,7 @@ public:
 
         for (int i = workerId; i < block_length; i+= MultiVertex::numWorkers())
         {
-            if (dist[i] != 0) {
+            if (dist[i] != INT_MAX) {
                 continue;
             }
 

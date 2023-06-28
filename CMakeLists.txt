@@ -34,8 +34,8 @@ target_link_libraries(matrix-ipu-calc
 configure_file(src/codelets/spmv/MatrixBlock.cpp codelets/spmv/MatrixBlock.cpp COPYONLY)
 configure_file(src/codelets/spmv/ReducerToVector.cpp codelets/spmv/ReducerToVector.cpp COPYONLY)
 
-configure_file(src/codelets/bfs/MatrixBlockBFS.cpp codelets/bfs/MatrixBlockBFS.cpp COPYONLY)
-configure_file(src/codelets/bfs/ReducerBFS.cpp codelets/bfs/ReducerBFS.cpp COPYONLY)
+configure_file(src/codelets/bfs/MatrixBlock.cpp codelets/bfs/MatrixBlock.cpp COPYONLY)
+configure_file(src/codelets/bfs/Normalize.cpp codelets/bfs/Normalize.cpp COPYONLY)
 
 # include_directories(include)
 # add_subdirectory(src)

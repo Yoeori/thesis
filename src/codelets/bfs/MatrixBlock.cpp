@@ -8,16 +8,16 @@
 
 using namespace poplar;
 
-class MatrixBlockBFS : public MultiVertex
+class MatrixBlock : public MultiVertex
 {
 public:
     // Data structure:
-    // m[i] = M_(E_t where row_idx[t] >= i and row_idx[t + 1] < i ==> t, idx[i])
+    // m[i] = 1 <==> M_(E_t where row_idx[t] >= i and row_idx[t + 1] < i ==> t, idx[i])
     Input<Vector<int>> idx;
     Input<Vector<int>> row_idx;
 
-    Input<Vector<bool>> frontier;
-    Output<Vector<unsigned int>> res;
+    Input<Vector<float>> vec;
+    Output<Vector<float>> res;
 
     auto compute(unsigned workerId) -> bool
     {
@@ -25,12 +25,12 @@ public:
         // Go by row
         for (auto i = workerId; i < row_idx.size() - 1; i+= MultiVertex::numWorkers())
         {
-            res[i] = 0;
+            res[i] = 0.0;
+
             for (auto j = row_idx[i]; j < row_idx[i + 1]; j++)
             {
-                if (frontier[idx[j]]) 
-                {
-                    res[i] = 1;
+                if (vec[idx[j]] > 0) {
+                    res[i] = 1.0;
                     goto cnt;
                 }
             }
