@@ -39,6 +39,8 @@ The host reads input and compiles a compute graph for the IPU to be executed.
 If you're serious about development for the IPU I recommend the following resources:
 - https://github.com/graphcore/tutorials/tree/sdk-release-3.0/tutorials/poplar
 - https://docs.graphcore.ai/projects/ipu-programmers-guide/en/latest/ipu_introduction.html
+- https://docs.graphcore.ai/projects/poplar-user-guide/en/latest/
+- https://docs.graphcore.ai/projects/poplar-api/en/latest/
 - https://github.com/UoB-HPC/ipu-hpc-cookbook
 
 ## Thanks

@@ -37,5 +37,9 @@ configure_file(src/codelets/spmv/ReducerToVector.cpp codelets/spmv/ReducerToVect
 configure_file(src/codelets/bfs/MatrixBlock.cpp codelets/bfs/MatrixBlock.cpp COPYONLY)
 configure_file(src/codelets/bfs/Normalize.cpp codelets/bfs/Normalize.cpp COPYONLY)
 
+configure_file(src/codelets/prims/PrimsBlock.cpp codelets/prims/PrimsBlock.cpp COPYONLY)
+configure_file(src/codelets/prims/ReduceBlock.cpp codelets/prims/ReduceBlock.cpp COPYONLY)
+configure_file(src/codelets/prims/GatherResult.cpp codelets/prims/GatherResult.cpp COPYONLY)
+
 # include_directories(include)
 # add_subdirectory(src)

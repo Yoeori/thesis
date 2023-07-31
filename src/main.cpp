@@ -16,6 +16,7 @@
 
 #include "experiments/sparse_matrix_vector_mult.cpp"
 #include "experiments/breadth_first_search.cpp"
+#include "experiments/prims_algorithm.cpp"
 
 #include <poplar/DeviceManager.hpp>
 
@@ -41,7 +42,7 @@ optional<ExperimentReportIPU> execute_experiment(const poplar::Device & device, 
     } 
     else if (exp == "prims")
     {
-        return exp_spmv::execute(device, matrix, rounds);
+        return exp_prims::execute(device, matrix, rounds);
     }
     else if (exp == "spmv")
     {
@@ -111,6 +112,10 @@ int main(int argc, char *argv[])
     // std::vector<float> v(1000);
     // std::iota(std::begin(v), std::end(v), 1);
     // auto mtx = optional(matrix::identity_from_iterator(v));
+    // auto matri = matrix::Matrix<float>(1000, 1000, 2);
+    // matri.set(1, 0, 1);
+    // matri.set(0, 1, 1);
+    // auto mtx = optional(matri);
 
     if (!mtx.has_value())
     {

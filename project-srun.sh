@@ -6,6 +6,9 @@
 #SBATCH -o /home/yoeri/output/thesis-ipu/slurm.%N.%j.out
 #SBATCH -e /home/yoeri/output/thesis-ipu/slurm.%N.%j.err
 
+FILES=(~/data/tests/*.mtx)    
+FILE=${FILES[$SLURM_ARRAY_TASK_ID]}
+
 ulimit -s 10240
 mkdir -p /home/yoeri/output/thesis-ipu
 
@@ -17,4 +20,4 @@ module load graphcore/sdk/3.0.0
 # TODO: Setup build system? Make sure build is set to release (-O3)?
 export IPUOF_CONFIG_PATH=/cm/shared/apps/graphcore/vipu/etc/ipuof.conf.d/p64_cl_a01_a16.conf
 cd /home/yoeri/thesis/build
-srun ./matrix-ipu-calc ~/data/tests/bfly.mtx -e spmv --seed 1 --rounds 10
+srun ./matrix-ipu-calc $FILE -e spmv --seed 1 --rounds 10
